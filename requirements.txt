@@ -1,0 +1,94 @@
+# DrishtiSR dependencies.
+#
+# Pins target the Kaggle Python image. Kaggle rebases that image every few weeks,
+# so on the first notebook run of a session verify with:
+#     !python -c "import torch, numpy; print(torch.__version__, numpy.__version__)"
+# and update this file if the pins fight the preinstalled stack. Never let pip
+# resolve a different torch on Kaggle -- that silently swaps the CUDA build and
+# costs a reinstall out of the 30 h/week GPU budget.
+#
+# On Kaggle:  !pip install -q -r requirements.txt
+# Locally:    see the "local only" block at the bottom.
+#
+# INSTALL ORDER MATTERS LOCALLY: install this file FIRST, then torch. torch 2.5.1
+# pins sympy==1.13.1 while onnx pulls sympy 1.14.0, so installing torch second
+# lets it downgrade sympy cleanly. The reverse order leaves torch with a sympy
+# it did not ask for.
+
+# --- Preinstalled on Kaggle; pins match the image so pip is a no-op there ---
+numpy==1.26.4
+pandas==2.2.3
+scipy==1.14.1
+matplotlib==3.10.0
+scikit-image==0.25.2
+tqdm==4.67.1
+pillow==11.1.0
+
+# --- Geospatial I/O: Sentinel-2 GeoTIFF/JP2 reading, reprojection, windowing ---
+rasterio==1.4.3
+
+# --- SEN2NAIPv2 access ---
+# PINNED HARD, and the pin matters more than usual: we depend on
+# `tacoreader.v1`, which upstream describes as legacy while it migrates to the
+# v2 spec. The v2 API is incompatible -- its load() returns a TacoDataset with
+# no .read() and does not accept the "tacofoundation:" protocol that resolves
+# dataset names. If v1 is dropped in a future 2.x release, an unpinned install
+# breaks the data layer with no warning. Verified working: 2.1.0.
+tacoreader==2.1.0
+# fsspec needs BOTH of these for the HTTP range reads tacoreader does. Without
+# them tacoreader prints a warning, swallows the error, and fails later with a
+# misleading "No objects to concatenate".
+requests==2.32.3
+aiohttp==3.11.11
+# UNDECLARED DEPENDENCY OF tacoreader 2.1.0. `import tacoreader` fails outright
+# with ModuleNotFoundError: No module named 'pydantic' on a clean install --
+# tacoreader/dataset.py imports it but its package metadata does not list it.
+# Verified by installing tacoreader alone into an empty venv. Do not remove.
+pydantic==2.13.5
+
+# --- Configuration ---
+omegaconf==2.3.0
+pyyaml==6.0.2
+
+# --- Export and CPU deployment (INT8 ONNX on 6 threads) ---
+onnx==1.17.0
+onnxruntime==1.20.1
+
+# --- Evaluation metrics ---
+# scikit-image (above) provides SSIM. LPIPS needs its own package: it is the
+# reference implementation, and its calibrated linear weights cannot be
+# reconstructed from a torchvision backbone alone.
+#
+# IT DOWNLOADS PRETRAINED WEIGHTS ON FIRST USE (~233 MB of torchvision AlexNet,
+# plus the small LPIPS linear layers that ship in the wheel), so it cannot run
+# on a machine with no internet -- on Kaggle, enable the notebook's internet
+# toggle, or set metrics.lpips.enabled=false. Everything else in
+# src/metrics/ runs offline, and --smoke disables LPIPS for exactly this reason.
+#
+# lpips 0.1.4 declares torch/torchvision/numpy/scipy/tqdm, all already pinned
+# above or installed alongside torch, so `pip install --no-deps lpips==0.1.4`
+# is safe and avoids any chance of it resolving a different torch.
+lpips==0.1.4
+
+# --- Dev / test ---
+pytest==8.3.4
+
+# --- local only -----------------------------------------------------------
+# torch is PREINSTALLED ON KAGGLE with the correct CUDA build. Do NOT install it
+# there -- a reinstall swaps the CUDA build and burns GPU-session time.
+#
+# Locally we use a venv on D: (C: has ~18 GB free; torch alone is ~2.5 GB):
+#
+#   py -3.11 -m venv D:\SIH\DrishtiSR\.venv
+#   D:\SIH\DrishtiSR\.venv\Scripts\Activate.ps1
+#   $env:PIP_CACHE_DIR = "D:\SIH\pip-cache"
+#   python -m pip install -r requirements.txt
+#   python -m pip install torch==2.5.1 torchvision==0.20.1 \
+#       --index-url https://download.pytorch.org/whl/cpu
+#
+# VERIFIED WORKING on Python 3.11.9 / Windows 11: torch 2.5.1+cpu,
+# torchvision 0.20.1+cpu, torch.get_num_threads()==6 (matches the deployment
+# target), cuda_available=False as expected. Full suite: 67 passed.
+#
+# torch==2.5.1
+# torchvision==0.20.1

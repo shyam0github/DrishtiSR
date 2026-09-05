@@ -1,0 +1,540 @@
+# DrishtiSR base configuration (OmegaConf).
+#
+# Every script reads its settings from here or from a config that merges on top of it.
+# NOTHING in src/ or scripts/ may hardcode a filesystem path, a band name, or a scale
+# factor. If you need a new constant, it goes in this file.
+#
+# Load with:
+#     from omegaconf import OmegaConf
+#     cfg = OmegaConf.load("configs/base.yaml")
+
+project:
+  name: DrishtiSR
+  problem_statement: SIH26142
+  description: Deep-learning super-resolution of Sentinel-2 imagery, 10 m -> 2.5 m (x4).
+
+seed: 42
+
+paths:
+  # Explicit override. Leave null in version control. If set, it wins over both
+  # candidates below and must exist (see src/utils/paths.resolve_data_root).
+  data_root: null
+
+  # Candidate roots, tried in this order by resolve_data_root().
+  # Kaggle mounts competition/dataset inputs read-only under /kaggle/input.
+  kaggle_data_root: /kaggle/input
+  # Local Windows mirror of the same tree. Forward slashes are intentional:
+  # pathlib handles them correctly on Windows and they survive YAML unescaped.
+  local_data_root: D:/SIH/DrishtiSR/data
+
+  # Written artefacts. Relative paths resolve against the repository root, which
+  # keeps the repo identical on D: and under /kaggle/working.
+  output_root: outputs
+  # Sample cache. On Kaggle this should be /kaggle/temp: it is large, fast, and
+  # NOT counted against the 20 GB /kaggle/working output quota. Resolved by
+  # src/utils/paths.resolve_cache_dir, which prefers kaggle_cache_dir when the
+  # Kaggle filesystem is present.
+  cache_dir: outputs/cache
+  kaggle_cache_dir: /kaggle/temp/drishtisr_cache
+  checkpoint_dir: outputs/checkpoints
+  figure_dir: outputs/figures
+  metric_dir: outputs/metrics
+  manifest_dir: outputs
+  log_file: outputs/run.log
+
+dataset:
+  # Key into src/data/registry.py. Switching datasets is a change to THIS LINE
+  # plus the matching block below -- never a change to training code.
+  name: sen2naipv2
+
+  # Band names in channel order. Order is load-bearing: it fixes the channel axis
+  # for every tensor in the project.
+  # VERIFIED against record NA5120_E1183N0757__m_3912321_nw_10_060_20220710:
+  # SEN2NAIPv2 stores RGBN, i.e. red first, NIR last. Listing these as
+  # [B02, B03, B04, B08] would silently transpose red and blue.
+  bands: [B04, B03, B02, B08]
+
+  # reflectance = digital_number / reflectance_scale
+  # VERIFIED, not taken from the dataset card. The card's "/ 3000" is a display
+  # stretch for RGB rendering. Measured band means on a Mendocino forest record
+  # were R=578.7 G=565.5 B=343.5 NIR=2486.3; dividing by 10000 gives
+  # R=0.058 G=0.057 B=0.034 NIR=0.249, which is textbook vegetation surface
+  # reflectance. Dividing by 3000 would put a forest at 0.83 NIR -- impossible.
+  # 10000 is also the standard Sentinel-2 L2A quantification value.
+  reflectance_scale: 10000.0
+
+  # Nominal physical range of surface reflectance. Bright targets (cloud, snow,
+  # specular water, some urban roofs) legitimately exceed 1.0.
+  # DO NOT clip to this range silently -- the spectral-consistency objective needs
+  # the true radiometry end to end. Used for assertions and reporting only.
+  reflectance_nominal_min: 0.0
+  reflectance_nominal_max: 1.0
+  # Upper bound enforced by SRPairDataset.validate_sample(). This is a guard
+  # against DECODING faults, not a radiometric limit -- it must never be reached
+  # by clipping.
+  #
+  # RAISED FROM 1.2 TO 2.0, MEASURED over 1322 cached crosssensor tiles at the
+  # full 128 px tile size (the old 64 px centre crop simply never contained these
+  # pixels, which is why 1.2 held before):
+  #   - 4 tiles of 1322 (0.3%) exceed 1.2 reflectance; the largest is 1.685.
+  #   - The excess is 1-20 pixels per tile, in small contiguous blobs, bright in
+  #     ALL FOUR bands at once (e.g. 1.62 / 1.685 / 1.669 / 1.30 against a tile
+  #     mean of 0.15). Spectrally flat and extremely bright across VIS+NIR is the
+  #     signature of cloud or a specular roof -- real signal, not corruption.
+  #   - Per-band max DIGITAL NUMBERS agree exactly between LR and HR on those
+  #     tiles (16200/16848/16688/13000), i.e. both sources carry the same bright
+  #     target rather than one having been mis-scaled.
+  #   - Nothing exceeds 2.0. Nothing approaches 6.5535, which is what an unmasked
+  #     nodata pixel (65535/10000) would produce, and nothing sits near the ~3.3x
+  #     inflation a /3000 divisor would cause.
+  # So 2.0 still catches both failure modes the check exists for while admitting
+  # the bright tail the spectral-consistency objective must reproduce. Do NOT
+  # respond to a future breach by clipping -- measure it the same way first.
+  reflectance_valid_max: 2.0
+
+  # Sentinel value for "no valid observation", in RAW digital numbers.
+  # VERIFIED: both LR and HR GeoTIFFs declare nodata=65535. This MUST be masked
+  # before scaling -- 65535/10000 = 6.55 reflectance would trip validation on
+  # every tile containing a nodata pixel.
+  nodata_value: 65535
+  # What to write where a pixel is nodata, in reflectance units, after masking.
+  nodata_fill: 0.0
+  # Reject a sample whose nodata fraction exceeds this (0.0-1.0).
+  #
+  # A pixel counts as nodata when ANY selected band equals nodata_value there,
+  # and the fraction is measured over the FULL stored tile (130x130 LR,
+  # 520x520 HR), not over a centre crop -- nodata sits at tile edges, which is
+  # exactly what a centre crop hides.
+  #
+  # LOWERED FROM 0.05 TO 0.02. A 5% nodata tile is 845 dead LR pixels; filled
+  # with nodata_fill they read as a large black patch of perfectly flat
+  # "reflectance", which the spectral-consistency term will happily learn to
+  # reproduce. The index reports the loss this threshold causes rather than
+  # applying it silently -- see the summary block from scripts/prepare_data.py.
+  max_nodata_fraction: 0.02
+
+  # Reporting-only reflectance threshold for the index summary block. Samples
+  # exceeding it are listed by name. This is NOT a validation limit (that is
+  # reflectance_valid_max) and NOTHING is clipped to it -- it is the tripwire
+  # for a wrong reflectance_scale, since a divisor that is too small inflates
+  # every tile at once.
+  reflectance_report_threshold: 1.2
+  # If more than this FRACTION of indexed samples exceed the threshold above,
+  # the index says the divisor is suspect rather than just printing a count.
+  # A genuine bright tail (cloud, snow, specular roofs) is a few percent; a
+  # wrong divisor moves the whole archive.
+  divisor_suspect_fraction: 0.05
+
+  # Ground sample distance in metres, before and after super-resolution.
+  lr_gsd_m: 10.0
+  hr_gsd_m: 2.5
+
+# Per-dataset settings. The active one is chosen by dataset.name above.
+# Adding a dataset means adding a block here plus a @register_dataset class --
+# it must never require touching training code.
+sen2naipv2:
+  # VERIFIED present in the tacoreader registry: sen2naipv2-unet,
+  # sen2naipv2-histmatch, sen2naipv2-crosssensor. "sen2naipv2-temporal" is
+  # advertised on the dataset card but does NOT resolve -- do not use it.
+  #
+  # crosssensor is the default: 8000 pairs of REAL Sentinel-2 LR (unet and
+  # histmatch use synthetic LR), and it is a single .taco file rather than a
+  # multipart set, which makes caching simpler and resumption cheaper.
+  subset: sen2naipv2-crosssensor
+  num_samples: 3000
+
+  # Filter on the per-pair LR/HR correlation carried in the taco metadata.
+  # MEASURED over all 8000 crosssensor rows: min=0.866, p05=0.869, median=0.904,
+  # max=0.983. So a 0.8 threshold is a no-op that only looks like a quality
+  # filter. 0.9 is the first value that actually bites: it keeps 4409 rows,
+  # still comfortably above num_samples. null disables the filter.
+  min_correlation: 0.9
+
+  # Restrict to a tortilla:data_split value, or null for all splits.
+  # MEASURED: crosssensor is 100% "train" (8000/8000) -- it ships NO validation
+  # or test split. Filtering on "train" is therefore a no-op that gives false
+  # confidence, so this is null and we must cut our own held-out split
+  # geographically (adjacent NAIP tiles overlap, so a random split would leak).
+  split: null
+
+  # Transient-failure handling for the download. MEASURED: an unattended run died
+  # after 121 samples with FileNotFoundError on the .taco URL -- fsspec's HTTP
+  # layer maps EVERY non-OK status (429 rate limiting included) to
+  # FileNotFoundError, so a momentary throttle looks like a missing file and
+  # aborts the whole job. At ~10.4 s/sample a full 3000-sample fetch runs ~8.7
+  # hours, which is far too long to be killed by one blip.
+  max_retries: 6
+  # Exponential: 15s, 30s, 60s, 120s, 240s between attempts. The long tail is
+  # deliberate -- rate limits clear on the order of minutes, not seconds.
+  retry_backoff_s: 15
+  # Optional politeness delay between fetches, in seconds. 0 disables it. Raise
+  # this if throttling persists despite retries.
+  request_delay_s: 0.0
+
+worldstrat:
+  # UNVERIFIED LAYOUT. The Kaggle mount was not available when this was written,
+  # so the directory structure below is a documented assumption, not a measured
+  # fact. Run scripts/prepare_data.py --dataset worldstrat and read the error
+  # it raises, or inspect /kaggle/input yourself, then correct these globs.
+  # See src/data/worldstrat.py for the full list of assumptions.
+  root_subdir: worldstrat
+  hr_glob: "**/*_ps.tiff"
+  lr_dir_name: L2A
+  lr_glob: "*.tiff"
+  num_samples: 3000
+  # WorldStrat pairs are MULTI-FRAME LR (multiple revisits) with a single HR.
+  # We take one revisit only -- see the known-limitation note in worldstrat.py.
+  revisit_strategy: first
+
+# Geographic train/val/test split. See src/data/splits.py for why this must not
+# be random: adjacent NAIP quarter-quads overlap, so a random split puts nearly
+# identical HR pixels in train and validation and inflates every reported number.
+splits:
+  fractions:
+    train: 0.8
+    val: 0.1
+    test: 0.1
+  # No two samples in different splits may be closer than this. Patches are
+  # ~1.3 km across (130 px at 10 m GSD), so 5 km leaves a comfortable buffer
+  # beyond any possible overlap. Raise it if the split report shows suspiciously
+  # high validation scores; lower it only with a reason.
+  min_separation_km: 5.0
+  # Also group by the NAIP quarter-quad id parsed from the sample id. Records
+  # sharing a quad come from one aerial scene and overlap regardless of centroid
+  # distance.
+  group_by_scene: true
+  seed: 42
+  # Written by scripts/make_splits.py, read back by the dataset when
+  # cfg.dataset.split_file is set.
+  output_name: "splits_{dataset}.csv"
+
+# Patch extraction. The model trains on patches cut out of the stored tiles, not
+# on whole tiles. lr_size here is the MODEL's input size; cfg.sr.lr_patch_size is
+# the size of the tile the dataset emits, which must be >= lr_size. They are
+# separate knobs on purpose: shrinking the model's receptive field must not
+# require re-cropping (or re-downloading) the data.
+patches:
+  # LR patch edge in pixels. The HR patch is exactly lr_size * sr.scale, and the
+  # HR crop origin is exactly scale * the LR crop origin -- asserted on every
+  # call in src/data/patches.py. An off-by-one here is invisible in the loss and
+  # fatal to the model.
+  lr_size: 64
+  # Stride in LR pixels for deterministic grid extraction (validation). Set
+  # below lr_size for overlapping patches.
+  stride: 64
+  # Default extraction mode: "grid" (deterministic, validation) or "random"
+  # (random crop, training).
+  mode: grid
+  # Random crops drawn per source tile per epoch, in "random" mode.
+  random_per_sample: 1
+
+  # WHY lr_size (64) IS BELOW sr.lr_patch_size (128), and why they must not be
+  # equal. MEASURED: when the patch equals the tile, grid mode yields exactly one
+  # patch per tile and random mode returns the identical crop every epoch -- the
+  # augmentation silently becomes a no-op, and ~75% of every downloaded 130x130
+  # LR tile is thrown away. VERIFIED on the cached subset: 98 validation tiles
+  # produced 98 patches at 64/64 but 391 at 128/64, and the cloud rule then
+  # rejected 1 of 392 candidates rather than 0 of 98 -- i.e. at 64/64 the filter
+  # had nothing to filter. If you ever raise lr_size to 128, raise
+  # sr.lr_patch_size with it (SEN2NAIPv2 stores 130 px LR tiles, so 128 is the
+  # ceiling) or the patch pipeline collapses back to one fixed centre crop.
+  # When a grid stride does not divide the tile evenly, emit one extra patch
+  # flush against the right/bottom edge rather than discarding the margin.
+  # Set true to drop the margin instead.
+  drop_incomplete_edge: false
+
+  # Rejection rules. Every rejection is counted per rule and logged -- a filter
+  # that quietly eats 90% of the training set is worse than no filter at all.
+  filters:
+    enabled: true
+    # Fraction of pixels that may be nodata before the patch is rejected.
+    # Evaluated over LR and HR together.
+    max_nodata_fraction: 0.05
+    # Cloud proxy. SEN2NAIPv2 ships NO cloud mask, so "cloud" here means
+    # "implausibly bright across all bands", which also catches snow and
+    # specular roofs. It is a proxy and is documented as one; pass a real mask
+    # to PatchFilter when a dataset provides one.
+    # Reflectance above this in EVERY band counts a pixel as cloud-like.
+    bright_reflectance: 0.6
+    max_bright_fraction: 0.20
+    # Near-constant patches (flat water, bare tarmac, fill) carry no
+    # high-frequency signal to super-resolve and contribute only a bias toward
+    # blurring. Threshold is in reflectance units, on the HR patch.
+    min_std: 0.005
+    # How per-band standard deviations are combined: "mean" or "max".
+    std_statistic: mean
+
+# DataLoader construction. See src/data/loader.py.
+loader:
+  # Split assignment source. null means "read the CSV written by
+  # scripts/make_splits.py" (paths.manifest_dir / splits.output_name). If that
+  # file is absent the split is recomputed in-process with the same seed and
+  # the same geographic rules, so a loader is never built on a random split.
+  split_file: null
+  train_split: train
+  val_split: val
+  # Only use samples already present in the local cache. The full download runs
+  # for hours; this lets every downstream stage be exercised on the partial
+  # cache without triggering fetches mid-epoch. The number of samples skipped is
+  # logged, never silently absorbed. Set false once the download completes.
+  cached_only: true
+  # A split with fewer than this many samples is an error, not a warning: a
+  # 1-sample validation set produces a meaningless curve.
+  min_samples_per_split: 1
+  shuffle_train: true
+  drop_last: false
+  pin_memory: false
+  persistent_workers: false
+
+# LR/HR co-registration audit. See src/eval/alignment.py and
+# scripts/qa_alignment.py. Misaligned pairs destroy SR training silently: the
+# model learns to blur, PSNR looks plausible, and nothing errors.
+alignment:
+  # Pairs sampled for the audit.
+  num_pairs: 50
+  # Sub-pixel resolution of the phase-correlation estimate: shifts are resolved
+  # to 1/upsample_factor of an HR pixel.
+  upsample_factor: 10
+  # Band used for registration, by name from dataset.bands. Red has the most
+  # land-surface structure of the visible bands and is present in every source
+  # we might switch to.
+  reference_band: B04
+  # HR-pixel border excluded before registration. Bicubic upsampling and any
+  # shift interpolation are unreliable at the edges, and phase correlation is
+  # sensitive to that.
+  border_crop_px: 8
+  # Windowing applied before phase correlation: "hann" or null. A window
+  # suppresses the edge discontinuity that otherwise shows up as a spurious
+  # zero-shift peak.
+  window: hann
+  # Cross-power spectrum weighting: "none" (plain cross-correlation) or "phase"
+  # (skimage's default phase correlation).
+  # MEASURED, and this default is not skimage's: on exactly-aligned synthetic
+  # pairs with a 2 px injected shift, "none" recovered (0.00, 0.00) on the
+  # control and (2.00, 2.00) on the injected set, while "phase" returned
+  # (1.40, 0.05) and (3.35, 0.65) -- a 1.4 px phantom shift on pairs that are
+  # aligned by construction. The reason is structural: phase normalisation
+  # weights every frequency equally, including the high frequencies where an
+  # upsampled LR image has essentially no energy and the HR image is all
+  # detail. LR/HR registration is exactly the case where the two spectra
+  # disagree, so the phase-normalised peak is decided by bins the two images do
+  # not share. Do not "fix" a noisy audit by switching this back.
+  normalization: none
+  # Verdict thresholds, in HR pixels of median shift magnitude.
+  # < pass_threshold_px            -> PASS
+  # [pass_threshold_px, warn_...]  -> WARN
+  # > warn_threshold_px            -> FAIL
+  pass_threshold_px: 1.0
+  warn_threshold_px: 2.0
+  # Per-band overlap required between the LR and HR reflectance ranges
+  # (intersection over union of the p1-p99 intervals). Below this the two
+  # sources are not radiometrically comparable and a PASS is downgraded.
+  range_overlap_min: 0.5
+  # Percentiles defining the "reflectance range" of a source, and the histogram
+  # resolution in the figure.
+  range_percentiles: [1.0, 99.0]
+  histogram_bins: 60
+  # Rows in the qualitative grid figure.
+  figure_pairs: 20
+  # Percentile stretch used ONLY to render figures. Display stretch, never
+  # applied to data that reaches a loss or a metric.
+  display_percentiles: [2.0, 98.0]
+  # Bands composited into the RGB previews, by name from dataset.bands. Falls
+  # back to a greyscale reference band when the dataset does not carry all three.
+  display_rgb_bands: [B04, B03, B02]
+  figure_dpi: 110
+  # Estimator self-test. When set to [dy, dx] in HR pixels, the audit shifts HR
+  # by that amount and checks the estimator recovers it -- proof the verdict can
+  # be trusted before it is applied to real data. null on real runs; the smoke
+  # block sets it.
+  inject_shift_px: null
+  inject_tolerance_px: 0.35
+  report_name: alignment_report.json
+  grid_figure_name: alignment_grid.png
+  histogram_figure_name: alignment_histograms.png
+
+sr:
+  scale: 4
+  # TILE sizes in pixels -- the crop the dataset emits, NOT the model's input.
+  # The model's patch size is cfg.patches.lr_size (64), cut out of these tiles.
+  # hr_patch_size must equal lr_patch_size * scale.
+  # 128 is the largest multiple of the 64 px patch that fits SEN2NAIPv2's stored
+  # 130x130 LR tiles. It gives 4 non-overlapping grid patches per tile and room
+  # for genuinely varied random crops; see the note in cfg.patches for the
+  # measurement, and do not lower it to 64 without lowering patches.lr_size too.
+  lr_patch_size: 128
+  hr_patch_size: 512
+
+train:
+  batch_size: 16
+  num_workers: 2
+  epochs: 100
+
+# Image-quality metrics. See src/metrics/image_quality.py for the definitions and
+# src/metrics/aggregate.py for the harness that applies them.
+#
+# THIS BLOCK IS PERMANENT. The bicubic baseline, every ablation, and the final
+# INT8 ONNX model are all scored through the same Evaluator with the same
+# settings; changing a value here invalidates every previously reported number,
+# so any change means re-running the baseline too.
+metrics:
+  # Which metrics to compute. Removing one from this list removes its columns
+  # from the per-sample CSV and the summary.
+  enabled: [psnr, ssim, sam, ergas, lpips]
+
+  # Peak reflectance for PSNR and the SSIM constants, in REFLECTANCE UNITS.
+  # FIXED, deliberately: this is cfg.dataset.reflectance_nominal_max, not each
+  # tile's own max. A per-image data range makes a bright tile score better for
+  # being bright and makes two runs incomparable. Reflectance above 1.0 is legal
+  # and is NOT clipped -- a bright tile simply reports a lower PSNR, which is the
+  # honest reading.
+  data_range: 1.0
+
+  # Reported alongside mean and std for every metric. A mean PSNR hides the
+  # failure cases; p5 is where they live.
+  percentiles: [5.0, 95.0]
+
+  ssim:
+    # Wang et al. (2004) settings, which are NOT scikit-image's defaults
+    # (7x7 uniform window, sample covariance). Passed explicitly so a number
+    # here is comparable to a published one; use_sample_covariance=False is
+    # hardcoded in src/metrics/image_quality.ssim for the same reason.
+    gaussian_weights: true
+    sigma: 1.5
+    # null lets scikit-image derive the window (11 px at sigma 1.5). Must be odd
+    # and no larger than the shorter side of the HR patch
+    # (cfg.patches.lr_size * cfg.sr.scale).
+    win_size: null
+
+  sam:
+    # Where a pixel's spectrum is the all-zero vector the angle does not exist.
+    # "nan" excludes and counts those pixels; "error" raises. There is
+    # deliberately no policy that calls them 0 degrees -- that would report
+    # perfect spectral fidelity over nodata.
+    zero_vector_policy: nan
+    # Percentile of the per-pixel SAM map reported per sample, next to the mean.
+    # A 1 degree mean with a 12 degree tail is a model that is wrong exactly
+    # where it matters, and only this column shows it.
+    report_percentile: 95.0
+
+  ergas:
+    # A reference band whose mean is exactly 0 makes ERGAS undefined. That means
+    # the patch is nodata and should have been rejected by cfg.patches.filters,
+    # so the default is to raise rather than to score it. "nan" defers to the
+    # aggregator, which counts non-finite values per metric.
+    zero_mean_policy: error
+
+  lpips:
+    # OFF BY DEFAULT IN SMOKE ONLY (see the smoke block). LPIPS needs pretrained
+    # backbone weights, downloaded on first use, so it cannot run without
+    # internet -- on Kaggle, enable the notebook's internet toggle.
+    enabled: true
+    # "alex" is the backbone the LPIPS authors recommend for evaluation.
+    net: alex
+    # Band names, by name from dataset.bands, composited as (R, G, B). Resolved
+    # through src/metrics/image_quality.rgb_band_indices so a change to the band
+    # order cannot silently feed LPIPS a blue/green/red image.
+    rgb_bands: [B04, B03, B02]
+    # REQUIRED CLIP, and the only clip in the metrics module. The network's
+    # domain is [-1, 1], so reflectance must be clipped into [0, 1] first.
+    # Applied to a temporary copy inside the metric; the fraction of clipped
+    # values is reported per sample as lpips_clipped_frac so a suspiciously good
+    # LPIPS on a cloudy tile is recognisable as an artefact of the clip.
+    clip_reflectance: true
+
+# Non-learned baselines. See src/eval/baselines.py and scripts/run_baseline.py.
+baseline:
+  # Methods scripts/run_baseline.py accepts. bicubic is THE BAR every model must
+  # clear; nearest is the absolute floor, which is what makes a bicubic score
+  # legible rather than merely large.
+  methods: [bicubic, nearest]
+  # Antialiased bicubic (the a=-0.5 MATLAB/PIL kernel). MEASURED: the two torch
+  # bicubic kernels differ by up to 0.083 reflectance on a x4 upsample, which is
+  # larger than the gap between competing architectures -- so this is a
+  # comparability setting, not a cosmetic one. See src/eval/baselines.py.
+  antialias: true
+  # Output names. {method} is filled in, so a bicubic run can never overwrite a
+  # nearest one.
+  csv_name: "baseline_{method}.csv"
+  json_name: "baseline_{method}.json"
+  figure_name: "baseline_qualitative.png"
+  # Rows in the qualitative figure: LR / SR / HR / SAM map, spread evenly across
+  # the validation set rather than taken from the front (the first patches of a
+  # grid-ordered split all come from one tile).
+  figure_samples: 6
+  # Display stretch for the figure ONLY, never applied to data that reaches a
+  # metric. Same convention as cfg.alignment.
+  display_percentiles: [2.0, 98.0]
+  display_rgb_bands: [B04, B03, B02]
+  # Upper limit of the SAM colour bar, in degrees, shared by every row so the
+  # panels are comparable. null derives it from the 99th percentile of the maps
+  # actually shown, and the value used is logged and printed in the caption.
+  sam_vmax_deg: null
+  figure_dpi: 110
+
+# Smoke mode: every entry-point script must accept --smoke and, when set, merge
+# this block over the config so a full run completes in a couple of minutes on CPU.
+#
+# Smoke switches dataset.name to the synthetic stub, which fabricates samples in
+# memory. This is deliberate: --smoke must NEVER touch the network, so it
+# exercises the full interface, validation, and manifest path without a download.
+smoke:
+  dataset:
+    name: synthetic_stub
+  synthetic_stub:
+    num_samples: 12
+  train:
+    batch_size: 2
+    num_workers: 0
+    epochs: 1
+  loader:
+    # The stub fabricates its samples, so nothing is cached and nothing needs to
+    # be: cached_only would filter every sample away.
+    cached_only: false
+  patches:
+    # A 32 px patch on a 32 px stride over the stub's 128 px tiles gives 16 grid
+    # patches per tile: enough to exercise the multi-patch path (which one patch
+    # per tile would not), few enough that the pre-flight stays quick.
+    lr_size: 32
+    stride: 32
+  alignment:
+    num_pairs: 8
+    figure_pairs: 4
+    # THE POINT OF THE SMOKE RUN. Stub pairs are exactly aligned, so the audit
+    # shifts HR by a known (dy, dx) and checks the estimator recovers it. Until
+    # that self-test passes, the verdict the audit prints on real data means
+    # nothing.
+    inject_shift_px: [2.0, 2.0]
+    # Separate filenames so a quick --smoke check never overwrites the audit of
+    # the real data. A stub report sitting at the real report's path, with a FAIL
+    # in it that is only an artefact of the injected shift, is exactly the kind
+    # of thing that gets read at 3 a.m. and believed.
+    report_name: alignment_report_smoke.json
+    grid_figure_name: alignment_grid_smoke.png
+    histogram_figure_name: alignment_histograms_smoke.png
+  metrics:
+    lpips:
+      # --smoke MUST NEVER TOUCH THE NETWORK, and LPIPS downloads pretrained
+      # backbone weights on first use. The other four metrics exercise the whole
+      # Evaluator path, so nothing about the pre-flight is weakened by this.
+      enabled: false
+  baseline:
+    figure_samples: 3
+    # Separate filenames, for the same reason as the alignment block above: a
+    # stub result sitting at the real result's path is a number that gets quoted
+    # later and believed. Stub PSNR is meaningless -- the stub's LR is an exact
+    # block mean of its own HR, so bicubic scores far better on it than on real
+    # Sentinel-2 data ever will.
+    csv_name: "baseline_{method}_smoke.csv"
+    json_name: "baseline_{method}_smoke.json"
+    figure_name: "baseline_qualitative_smoke.png"
+
+synthetic_stub:
+  # In-memory fake used by --smoke and by the contract tests. Never downloads.
+  num_samples: 4
+  seed: 0
+
+runtime:
+  # Deployment target: INT8 ONNX on CPU. Enforced by the export/benchmark scripts.
+  num_threads: 6
+  max_parameters: 1000000

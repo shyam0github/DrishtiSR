@@ -1,0 +1,40 @@
+==========================================================================
+  INDEX SUMMARY
+==========================================================================
+  manifest            D:\SIH\DrishtiSR\outputs\manifest_sen2naipv2.csv
+  indexed             3000 of 3000 catalog samples
+    measured now      3000
+    reused from disk  0
+    not yet cached    0
+
+  accepted            3000
+  rejected            0
+    (nothing rejected)
+
+  per-band reflectance percentiles, pooled over every indexed pixel
+  (nodata excluded, unclipped, DN / 10000)
+    band               p1        p50        p99
+    hr_B02         0.0156     0.0660     0.1956
+    hr_B03         0.0336     0.0928     0.2472
+    hr_B04         0.0220     0.1092     0.3144
+    hr_B08         0.1192     0.2484     0.4708
+    lr_B02         0.0160     0.0660     0.1956
+    lr_B03         0.0336     0.0928     0.2476
+    lr_B04         0.0220     0.1096     0.3144
+    lr_B08         0.1192     0.2484     0.4708
+
+  samples exceeding 1.2 reflectance: 9 of 3000 (0.30%)
+    NA5120_E1208N0715__m_3812146_sw_10_060_20200617
+    NA5120_E1254N0609__m_3411754_sw_11_060_20200423
+    NA5120_E1406N0832__m_4511123_sw_12_060_20190720
+    NA5120_E1449N0595__m_3510651_ne_13_060_20220526
+    NA5120_E1489N0789__m_4410545_sw_13_060_20220628
+    NA5120_E1534N0558__m_3310110_nw_14_060_20220906
+    NA5120_E1548N0461__m_2910033_se_14_060_20220606
+    NA5120_E1615N0645__m_3709705_ne_14_060_20190712
+    NA5120_E1629N0538__m_3309659_se_14_060_20220704
+
+  Divisor looks sound: 0.30% of samples exceed 1.2, below the 5% threshold.
+  A small bright tail is expected and physical (cloud, snow, specular water, bright roofs)
+  and is deliberately NOT clipped.
+==========================================================================

@@ -1,0 +1,11 @@
+# Normalise to LF in the repository. The same tree is checked out on Windows
+# locally and on Linux under /kaggle, so the working copy must not decide.
+* text=auto eol=lf
+
+*.png binary
+*.npz binary
+*.npy binary
+*.tif binary
+*.onnx binary
+*.pt binary
+*.pth binary

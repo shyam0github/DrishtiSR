@@ -1,0 +1,36 @@
+# Imagery and intermediate arrays -- never version these
+*.tif
+*.tiff
+*.jp2
+*.npy
+*.npz
+*.SAFE/
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
+*.onnx
+checkpoints/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.venv*/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Run artefacts -- ignore the contents, keep the directory skeleton.
+# This block is last on purpose: the negations must win over `checkpoints/` above.
+outputs/**
+!outputs/**/
+!outputs/**/.gitkeep

@@ -1,0 +1,34 @@
+==========================================================================
+  INDEX SUMMARY
+==========================================================================
+  manifest            D:\SIH\DrishtiSR\outputs\manifest_sen2naipv2.csv
+  indexed             1100 of 1100 catalog samples
+    measured now      1100
+    reused from disk  0
+    not yet cached    0
+
+  accepted            1100
+  rejected            0
+    (nothing rejected)
+
+  per-band reflectance percentiles, pooled over every indexed pixel
+  (nodata excluded, unclipped, DN / 10000)
+    band               p1        p50        p99
+    hr_B02         0.0140     0.0716     0.2128
+    hr_B03         0.0300     0.0996     0.2656
+    hr_B04         0.0208     0.1252     0.3336
+    hr_B08         0.1108     0.2448     0.4672
+    lr_B02         0.0140     0.0720     0.2128
+    lr_B03         0.0300     0.0996     0.2656
+    lr_B04         0.0208     0.1252     0.3336
+    lr_B08         0.1108     0.2448     0.4672
+
+  samples exceeding 1.2 reflectance: 3 of 1100 (0.27%)
+    NA5120_E1208N0715__m_3812146_sw_10_060_20200617
+    NA5120_E1254N0609__m_3411754_sw_11_060_20200423
+    NA5120_E1406N0832__m_4511123_sw_12_060_20190720
+
+  Divisor looks sound: 0.27% of samples exceed 1.2, below the 5% threshold.
+  A small bright tail is expected and physical (cloud, snow, specular water, bright roofs)
+  and is deliberately NOT clipped.
+==========================================================================
