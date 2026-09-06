@@ -85,6 +85,34 @@ lpips==0.1.4
 # executable, which is NOT on PATH on this machine.
 kaggle==2.2.4
 
+# --- External benchmark: opensr-test ---------------------------------------
+# The independent check on our own metrics (src/metrics/). ESA OpenSR, Aybar et
+# al., IEEE JSTARS 2024. Used by src/eval/opensr_harness.py.
+#
+# INSTALL WITH --no-deps, AND PIN opencv/numpy WITH IT. This is not fussiness;
+# MEASURED on this machine in that order:
+#   1. `pip install opensr-test` wants open-clip-torch and openai-clip, which are
+#      needed ONLY for the "clip" correctness distance that cfg.opensr_test does
+#      not use. They are large and pull timm/ftfy.
+#   2. Installing satalign pulled opencv-python 5.0.0.93, which REQUIRES
+#      numpy>=2. pip duly upgraded numpy to 2.4.6 and broke scipy 1.14.1
+#      (needs numpy<2.3) and the torch 2.5.1 build.
+#   3. Downgrading numpy alone does not stick: opencv 4.14 also requires
+#      numpy>=2, so pip re-upgrades it. Both must be pinned in ONE command.
+#
+#   .venv/Scripts/python.exe -m pip install opensr-test==1.3.3 --no-deps
+#   .venv/Scripts/python.exe -m pip install satalign mpltern #       "opencv-python==4.10.0.84" "numpy==1.26.4"
+#
+# CONSEQUENCE, recorded in reports/day1_gate.md: the "clip" correctness
+# distance is unavailable (VERIFIED: it raises ImportError for open_clip). The
+# "lpips" distance still works, because lpips==0.1.4 is already pinned above for
+# our own perceptual metric. "nd", the upstream default, is what we run.
+opensr-test==1.3.3
+satalign==0.1.17
+mpltern==1.0.5
+# Last opencv-python that accepts numpy 1.x. See the note above before bumping.
+opencv-python==4.10.0.84
+
 # --- Dev / test ---
 pytest==8.3.4
 

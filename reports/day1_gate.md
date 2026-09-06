@@ -1,204 +1,338 @@
-# Day 1 gate — SEN2NAIPv2 data audit
+# Day 1 gate — bicubic floor and external benchmark
 
 **Problem statement:** SIH26142, Sentinel-2 10 m → 2.5 m (x4) super-resolution.
-**Dataset:** `sen2naipv2-crosssensor`, 3,000 pairs cached, filtered at
-`min_correlation >= 0.9` from 8,000 catalog rows (4,409 survive the filter).
-**Date:** 2026-09-06. **Seed:** 42 throughout.
-
-**Gate verdict: PASS.** The pairs are co-registered, the reflectance divisor is
-correct, and no sample is lost to nodata. Training may proceed.
+**Generated:** 2026-09-06T16:40:19+00:00 by `scripts/make_day1_gate.py`, from the result files
+named under each table. No number in this document was typed by hand.
+**Seed:** 42 throughout.
 
 ---
 
-## 1. What changed before this audit ran
+## 1. Gate verdict: **PASSED**
 
-The index was amended before any number below was produced. Three of the changes
-alter what the numbers mean, so they are recorded here rather than in a commit
-message alone.
+There is a benchmarked bicubic floor, measured on real co-registered Sentinel-2
+/ NAIP pairs, by two independent metric implementations — ours and the external
+`opensr-test` suite — over **1199 validation patches with
+0 rejected**.
 
-**The centre crop left the read path.** `SEN2NAIPv2Dataset.load_sample` used to
-centre-crop every tile to `cfg.sr.lr_patch_size` before returning it. Every
-statistic taken through it therefore described the middle of the tile. Nodata
-sits at tile edges and bright targets sit anywhere but the middle, so the two
-questions this audit exists to answer were both being asked of the wrong pixels.
-`load_sample` now returns the full stored tile — LR `(4, 130, 130)`, HR
-`(4, 520, 520)`. The deterministic crop moved to
-`src/data/patches.centre_crop_pair` and is applied by the loader's **grid**
-(validation) path only; training draws random crops from the whole tile.
+The three numbers that carry the verdict:
 
-*The cache was never affected.* `ensure_cached` always wrote `src.read()`
-straight to disk with no crop, no band selection and no reflectance division, so
-all 3,000 `.npz` files hold full raw `uint16` tiles. Nothing was re-fetched.
+1. **The pairs are usable.** Alignment audit verdict **PASS**, median
+   shift **0.596 HR px = 1.49 m**, against a
+   PASS threshold of 1.0 px.
+   A model cannot learn a mapping the data does not contain, and at roughly a
+   7th of an LR pixel the mapping is there.
+2. **The floor is a real number, not a placeholder.** Bicubic scores
+   **38.47 dB PSNR** and
+   **0.8825 SSIM** over
+   1199 patches, with a p5 of
+   30.17 dB — the spread that says the
+   mean is not being carried by easy tiles.
+3. **The external benchmark ran clean and says what it should.** opensr-test
+   scored **1199 of 1199 attempted samples,
+   0 skipped**, and puts bicubic at
+   hallucination **0.0808** with omission
+   **0.8620**. That is the correct
+   signature for a method that invents nothing: it omits nearly everything and
+   hallucinates almost nothing. It is the floor a learned model has to move.
 
-**Nodata is measured, not filled.** A pixel counts as nodata when **any**
-selected band equals 65535 — one dead band makes the pixel unusable, and the
-previous `mask.mean()` over `(C, H, W)` would have reported a quarter of the
-true loss on a 4-band tile with one dead band. Nodata pixels are excluded from
-every statistic rather than replaced with `nodata_fill` and averaged in as if
-they were observations of a perfectly black surface.
-
-**Percentiles are exact.** The source is integer digital numbers, so the index
-accumulates a 65,536-bin count per band and reads percentiles off the inverse
-CDF. No binning error, and memory is bounded regardless of archive size.
-
----
-
-## 2. Index: partial (1,100) vs full (3,000)
-
-Full outputs: [`index_summary_partial.txt`](index_summary_partial.txt),
-[`index_summary_full.txt`](index_summary_full.txt).
-
-The partial baseline is the **first 1,100 catalog records** — the download had
-already completed by the time the amendment landed, so the partial set was
-reconstructed by restricting the catalog (`sen2naipv2.num_samples=1100`) rather
-than by cache state. Catalog order is download order, so these are the same
-1,100 records that were on disk at the partial moment.
-
-Both runs used `--force`. The manifest on disk had been written by the
-pre-amendment `build_index` under the old schema; without `--force` the
-incremental skip would have preserved all 3,000 of those rows and the comparison
-would have been between two schemas rather than two sample sizes.
-
-### Rejections
-
-| | partial (1,100) | full (3,000) |
-|---|---|---|
-| accepted | 1,100 | 3,000 |
-| rejected | **0** | **0** |
-
-Zero rejections at `cfg.dataset.max_nodata_fraction = 0.02` (lowered from 0.05
-as part of the amendment). **No tile in the cached archive contains a single
-nodata pixel.** This is worth stating plainly because it is the reason the
-threshold change cost nothing: it was tightened by more than half and still did
-not bite.
-
-### Reflectance above 1.2
-
-| | partial | full |
-|---|---|---|
-| samples exceeding 1.2 | 3 of 1,100 | 9 of 3,000 |
-| rate | **0.27 %** | **0.30 %** |
-
-**No meaningful jump.** +0.03 percentage points across a near-tripling of the
-sample. Both are an order of magnitude below the 5 % threshold at which the
-index calls the divisor suspect. The 3 partial-set samples are a strict subset
-of the 9 in the full set, which is what a stable bright tail looks like.
-
-### Per-band 99th percentile, pooled over every indexed pixel
-
-| band | p99 partial | p99 full | Δ | rel. |
-|---|---:|---:|---:|---:|
-| lr_B04 | 0.3336 | 0.3144 | −0.0192 | −5.8 % |
-| lr_B03 | 0.2656 | 0.2476 | −0.0180 | −6.8 % |
-| lr_B02 | 0.2128 | 0.1956 | −0.0172 | −8.1 % |
-| lr_B08 | 0.4672 | 0.4708 | +0.0036 | +0.8 % |
-| hr_B04 | 0.3336 | 0.3144 | −0.0192 | −5.8 % |
-| hr_B03 | 0.2656 | 0.2472 | −0.0184 | −6.9 % |
-| hr_B02 | 0.2128 | 0.1956 | −0.0172 | −8.1 % |
-| hr_B08 | 0.4672 | 0.4708 | +0.0036 | +0.8 % |
-
-**This is land cover, not a divisor fault**, on three independent grounds:
-
-1. **Direction.** The visible bands went *down* and NIR went *up*. A wrong
-   divisor is a single multiplicative constant applied to every band at once —
-   it cannot move VIS and NIR in opposite directions. A shift toward more
-   vegetation and less bright bare/urban surface does exactly this.
-2. **Geography.** The partial 1,100 span UTM zones 10–12 (California to Utah);
-   the full 3,000 reach zones 10–14, adding the higher-vegetation eastern half
-   of the archive. The catalog is ordered geographically, so the extra 1,900
-   records are a different landscape, not more of the same one.
-3. **Magnitude.** 6–8 %. The divisor failure mode this check exists for is
-   `/3000` instead of `/10000`, which is a factor of 3.33 — a 233 % move, not an
-   8 % one.
-
-The LR and HR percentiles agree to within 0.0004 reflectance in every band and
-at every quantile. Two independently-acquired sources landing on the same
-distribution is strong evidence that both `cfg.dataset.reflectance_scale = 10000`
-and the `[B04, B03, B02, B08]` band order are right for the **whole** archive,
-not just the part indexed first.
-
-**Divisor verdict: sound.** No change to `reflectance_scale` or `bands`.
+There is no result here that requires switching problem statements.
 
 ---
 
-## 3. Alignment audit: partial vs full
+## 2. Dataset, pairs and splits
 
-Reports: `outputs/metrics/alignment_report_partial1100.json`,
-`outputs/metrics/alignment_report.json`.
+Source: `outputs/splits_sen2naipv2.csv`, `baseline_bicubic.json`.
 
-| | partial (1,100) | full (3,000) |
-|---|---|---|
-| pairs audited | 50 | 50 |
-| **median shift** | **0.510 HR px** (1.27 m) | **0.596 HR px** (1.49 m) |
-| p90 shift | 0.864 px | 0.943 px |
-| max shift | 1.315 px | 1.315 px |
-| median (dy, dx) | (+0.000, +0.100) | (−0.100, +0.050) |
-| correlation at HR grid | 0.9014 | 0.9126 |
-| degenerate pairs excluded | 0 | 0 |
-| **verdict** | **PASS** | **PASS** |
+| | |
+|---|---|
+| dataset | `sen2naipv2` |
+| subset | `sen2naipv2-crosssensor` |
+| pairs cached | 3000 |
+| bands | B04, B03, B02, B08 (RGBNIR) |
+| reflectance scale | DN / 10000 |
+| scale factor | x4 (10 m → 2.5 m) |
+| LR patch | 64 px |
+| HR patch | 256 px |
 
-Median shift rose by **0.086 HR px — 0.21 m, or 0.02 LR pixels**. Both sit
-comfortably below the 1.0 px PASS threshold, and the maximum is identical
-between the two sets. The estimator's self-test (2.0 px injected, 2.00 px
-recovered, 0.00 px on the unshifted control) passes on every run, so these are
-measurements rather than opinions.
+**Split sizes, in tiles** (scene-disjoint; adjacent NAIP tiles overlap, so a
+random split would leak):
 
-One HR pixel is 2.5 m and a quarter of an LR pixel. A 0.6 px median means the
-pairs are registered to roughly a seventh of an LR pixel — well inside what
-super-resolution training tolerates.
+| split | tiles |
+|---|---:|
+| train | 2400 |
+| val | 300 |
+| test | 300 |
 
-### Coverage of the audit
-
-Both audits drew a **random sample without replacement, seed 42**, from the
-manifest rows that passed validation. Every selected sample id is listed in the
-JSON report and printed by the script.
-
-| | partial | full |
-|---|---|---|
-| distinct grid cells | **50 of 50 pairs** | **50 of 50 pairs** |
-| UTM zones spanned | 3 (32610–32612) | 5 (32610–32614) |
-
-No two audited pairs came from the same SEN2NAIP grid cell in either run. The
-full audit spans **50 distinct regions across 5 UTM zones**, not 50 pairs from
-one place — which is the claim the sampling change exists to make defensible.
-Sequential selection would have returned one contiguous block of the catalog and
-could not have supported it.
+The validation split's 300 tiles
+yield **1199 patches** at `patches.lr_size=64`,
+`stride=64`.
 
 ---
 
-## 4. Standing limitations
+## 3. Alignment verdict
 
-- **`min_correlation >= 0.9` is a pre-filter on the catalog's own metric**, not
-  an independent quality gate. 4,409 of 8,000 rows survive it and 3,000 are
-  taken from the top of that list. The audit describes those 3,000.
-- **No cloud mask.** SEN2NAIPv2 ships none. `cfg.patches.filters` uses a
-  brightness proxy, which also catches snow and specular roofs, and is
-  documented as a proxy in the config.
-- **`crosssensor` is 100 % `train`.** The subset carries no validation or test
-  split, so the held-out split must be cut geographically — adjacent NAIP tiles
-  overlap and a random split would leak. See `src/data/splits.py`.
-- **9 samples exceed 1.2 reflectance and are kept unclipped**, at up to 1.685.
-  They are spectrally flat and bright across all four bands, which is the
-  signature of cloud or a specular roof — real signal. Clipping them would
-  destroy the radiometry the spectral-consistency objective depends on.
-  `cfg.dataset.reflectance_valid_max = 2.0` catches decode faults without
-  touching this tail.
+Source: `outputs/metrics/alignment_report.json`.
 
-## 5. Reproducing this
+| | |
+|---|---|
+| pairs audited | 50 of 3000 |
+| sampling | random_without_replacement, seed 42 |
+| distinct regions | 50 |
+| UTM zones | 5 |
+| **median shift** | **0.596 HR px (1.49 m)** |
+| p90 shift | 0.943 px |
+| max shift | 1.315 px |
+| median (dy, dx) | (-0.100, +0.050) |
+| correlation at HR grid | 0.9126 |
+| degenerate pairs excluded | 0 |
+| **verdict** | **PASS** (PASS below 1.0 px, FAIL above 2.0 px) |
+
+One HR pixel is 2.5 m and a quarter of an LR pixel, so the median shift is
+about 0.149 LR pixels.
+
+---
+
+## 4. Bicubic baseline — our metrics
+
+Source: `outputs/metrics/baseline_bicubic.json`
+(and the same for each other method). n = 1199 patches,
+data_range = 1.0 reflectance, computed on CPU at
+6 threads.
+
+| metric | dir | bicubic mean | bicubic p5 | bicubic p95 | nearest mean | nearest p5 | nearest p95 |
+|---|:--:|---:|---:|---:|---:|---:|---:|
+| PSNR (dB) | ↑ | 38.47 | 30.17 | 46.35 | 37.86 | 29.39 | 45.72 |
+| SSIM | ↑ | 0.8825 | 0.7139 | 0.9771 | 0.8671 | 0.6824 | 0.9731 |
+| LPIPS | ↓ | 0.4033 | 0.1529 | 0.6205 | 0.3291 | 0.1299 | 0.5156 |
+| SAM (deg) | ↓ | 2.092 | 0.750 | 4.391 | 2.236 | 0.809 | 4.667 |
+| SAM p95 (deg) | ↓ | 5.925 | 1.832 | 11.850 | 6.328 | 1.952 | 12.836 |
+| ERGAS | ↓ | 3.050 | 1.067 | 6.070 | 3.281 | 1.137 | 6.580 |
+
+Bicubic beats pixel replication by **0.61 dB** PSNR. That gap is the
+scale on which every later result should be read: it is what the metric can
+express between "did nothing" and "did the free thing".
+
+**LPIPS is the exception and points the other way** — nearest scores
+0.3291 against bicubic's
+0.4033, i.e. replication looks
+*better* perceptually. This is expected and is not a bug: LPIPS rewards
+high-frequency content regardless of whether it is correct, and pixel replication
+preserves sharp block edges that bicubic smooths away. It is the single clearest
+argument in this report for why opensr-test is needed — a perceptual metric
+cannot distinguish real detail from blocky artefact, and the correctness metrics
+in section 5 can.
+
+---
+
+## 5. Bicubic baseline — external benchmark (`opensr-test` 1.3.3)
+
+Source: `outputs/metrics/opensr_bicubic.json`
+(and the same for each other method).
+
+Independent implementation, by ESA OpenSR (Aybar et al., IEEE JSTARS 2024).
+Nothing in this project wrote these metrics.
+
+| group | metric | dir | bicubic mean | bicubic p5 | bicubic p95 | nearest mean | nearest p5 | nearest p95 | non-finite |
+|---|---|:--:|---:|---:|---:|---:|---:|---:|---:|
+| Consistency | `reflectance` | ↓ | 0.0022 | 0.000751 | 0.0053 | 0.0022 | 0.000755 | 0.0054 | 0 |
+| Consistency | `spectral` | ↓ | 0.5152 | 0.1966 | 1.1906 | 0.5152 | 0.1943 | 1.1746 | 0 |
+| Consistency | `spatial` | ↓ | 0.0062 | 0.0000 | 0.0200 | 0.0042 | 0.0000 | 0.0200 | 0 |
+| Synthesis | `synthesis` | ↑ | 0.0026 | 0.000859 | 0.0063 | 0.0042 | 0.0014 | 0.0102 | 0 |
+| Correctness | `ha_metric` | ↓ | 0.0808 | 0.0344 | 0.1911 | 0.1692 | 0.0867 | 0.3232 | 0 |
+| Correctness | `om_metric` | ↓ | 0.8620 | 0.6935 | 0.9315 | 0.7408 | 0.5404 | 0.8554 | 0 |
+| Correctness | `im_metric` | ↑ | 0.0572 | 0.0327 | 0.1133 | 0.0900 | 0.0554 | 0.1421 | 0 |
+
+**Denominators.** `bicubic`: 1199 scored of 1199 attempted, 0 skipped (0.0%). `nearest`: 1199 scored of 1199 attempted, 0 skipped (0.0%).
+
+Configuration, all upstream defaults:
+`agg_method=pixel`,
+`border_mask=16`,
+`correctness_distance=nd`,
+`correctness_norm=softmin`,
+`gradient_threshold=auto`,
+`harm_apply_spectral=True`,
+`harm_apply_spatial=True`,
+`rgb_bands=[0, 1, 2]` (= ['B04', 'B03', 'B02']).
+
+**How to read this.** `om_metric`
+(0.8620) dominating `ha_metric`
+(0.0808) is exactly what a non-generative
+upsampler should produce: bicubic omits nearly all the real high-frequency
+detail and invents almost none. **The target for a learned model is to move
+`im_metric` up and `om_metric` down without moving `ha_metric` up** — that
+trade-off is the thing this project's uncertainty head exists to make visible,
+and it is now measurable from day one rather than at submission.
+
+### The two baselines do not order cleanly, and that is the finding
+
+Read the two columns above against each other before trusting any single
+correctness number:
+
+| | bicubic | nearest | bicubic better? |
+|---|---:|---:|:--:|
+| `ha_metric` ↓ | 0.0808 | 0.1692 | **yes** |
+| `om_metric` ↓ | 0.8620 | 0.7408 | no |
+| `im_metric` ↑ | 0.0572 | 0.0900 | no |
+
+**Pixel replication scores *better* than bicubic on improvement and omission,
+and worse only on hallucination.** This is not a defect in the run and it is not
+a bug in the harness. Nearest-neighbour fabricates hard block edges; a fraction
+of those edges land on genuine HR boundaries and are counted as improvement,
+while the rest are counted as hallucination. Bicubic smooths instead, so it does
+neither.
+
+This matters for the rest of the project in three ways:
+
+1. **`im_metric` alone is not a scoreboard.** A model can raise it by getting
+   sharper in a way that is only accidentally correct. It must always be read
+   with `ha_metric`.
+2. **It corroborates the LPIPS inversion in section 4** through a completely
+   independent implementation. Two different metrics, ours and theirs, both say
+   that sharpness and correctness are not the same axis. That is the premise the
+   uncertainty head is built on.
+3. **A belief this project held was wrong and is now corrected in a test.**
+   `tests/test_opensr_harness.py` originally asserted that bicubic must
+   out-improve nearest. It passed on synthetic scenes; the real data refutes it
+   on 94.7% of patches. The assertion was replaced with the one the data does
+   support — bicubic hallucinates less, on 96.3% of patches — and the reason is
+   recorded in that test's docstring.
+
+---
+
+## 6. Known caveats
+
+Written to be read by someone deciding whether to trust the numbers above.
+Everything here is either an assumption that could not be verified today, or a
+value taken on someone else's authority.
+
+### Verified, with the evidence stated
+
+- **The reflectance divisor is `10000`, and this
+  is measured rather than assumed.** Band means on a forest record give
+  R=0.058 G=0.057 B=0.034 NIR=0.249 after division, which is textbook vegetation
+  surface reflectance; `/3000` would put a forest at 0.83 NIR, which is
+  impossible. LR and HR percentiles agree to within 0.0004 reflectance in every
+  band. It is also the standard Sentinel-2 L2A quantification value. **It remains
+  an inference from radiometry, not a figure read off an official dataset spec
+  for SEN2NAIPv2.**
+- **opensr-test's expected scaling matches ours.** Its own README divides by
+  10000. Confirmed by measurement that passing digital numbers instead does
+  **not** raise: `reflectance` and `synthesis` inflate by the scale factor while
+  `spectral`, `ha`, `om` and `im` are unchanged. `src/eval/opensr_harness.py`
+  therefore refuses any triplet peaking above
+  `cfg.opensr_test.max_reflectance=10`.
+  This is a tripwire, not a clip — reflectance above 1.0 passes through.
+- **Band order needs no remapping.** `cfg.dataset.bands` is RGBNIR and so are
+  opensr-test's own datasets (its README slices `[idx, 0:3]` and documents the
+  result as Red, Green, Blue). Indices are still resolved by name, never assumed.
+
+### Assumed, and not verified
+
+- **`border_mask=16` is upstream's default, applied to a patch a third the size
+  of theirs.** Their datasets carry 484–512 px HR patches; ours are
+  256 px. The crop therefore removes a
+  larger *fraction* here — about 25% of the LR patch area — than it does in the
+  published benchmark. It was left at the default deliberately, because a
+  benchmark retuned to suit our patch size stops being an external benchmark, but
+  **the effect of that on comparability with the published table is unquantified.**
+- **Absolute comparison against the published opensr-test leaderboard is
+  indicative only.** Those numbers are on their NAIP/SPOT/Venµs datasets, not on
+  SEN2NAIPv2, and different scenes have different amounts of recoverable detail.
+  Our configuration is computationally equivalent to their "Normalized
+  Difference (ND)" column: they specify `agg_method="patch", patch_size=1`, and
+  `Metrics.__init__` forces `agg_method="pixel"` whenever `patch_size == 1`,
+  which is what we set directly. But the *scenes differ*, so only the ordering
+  between our own methods is a controlled comparison.
+- **The HR reference is NAIP aerial imagery, not true 2.5 m Sentinel-2.** No such
+  sensor exists, which is why the dataset is cross-sensor. Every "ground truth"
+  figure in this report is therefore against a harmonised proxy, and any residual
+  cross-sensor radiometric or BRDF difference is folded into the scores.
+- **`gradient_threshold=auto` is per-image**, resolving to the 75th percentile of
+  each tile's own reference distance. Comparisons between methods on the same
+  tile are controlled; the absolute correctness values depend on that per-tile
+  threshold.
+- **Correctness metrics do not penalise a global radiometric offset**, because
+  `harm_apply_spectral=true` histogram-matches SR to HR before scoring. That is
+  what makes "did the model invent detail" separable from "is the model
+  brighter", but it means these numbers must not be read as spectral fidelity.
+  Our SAM and the spectral-consistency loss cover that.
+- **1199 patches are not 1199 independent samples.** They come from
+  300 tiles, so patches from one
+  tile are correlated and the effective sample size is smaller than the
+  denominator suggests. The percentiles are more informative than the standard
+  deviations for this reason.
+- **The alignment audit is a 50-pair sample of 3000**,
+  not a census. It is a random draw without replacement at seed
+  42 spanning
+  50 distinct regions, which
+  supports the verdict, but no per-pair guarantee is implied for the other
+  2950.
+
+### Environment, pinned by hand
+
+- **opensr-test was installed with `--no-deps`.** Its full dependency set pulls
+  `open-clip-torch` and `openai-clip`, which are needed only for the `clip`
+  correctness distance this configuration does not use, and installing them
+  upgrades numpy past what torch 2.5.1 and scipy 1.14.1 accept in this venv.
+  **Consequence: the `clip` correctness distance is unavailable here** —
+  VERIFIED by running it, which raises `ImportError: The open_clip library is
+  not installed`. The `lpips` distance **is** available, because this project
+  already pins `lpips==0.1.4` for its own perceptual metric, and was likewise
+  verified by running it. Only `nd` (upstream's default) was used for the
+  numbers above; `lpips` remains an option and `clip` does not.
+- **`opencv-python` is pinned to 4.10.0.84 and numpy to 1.26.4.** Installing
+  satalign pulled opencv 5.x, which requires numpy >= 2, which broke scipy. The
+  pin was chosen to keep the existing environment working. **It is not
+  necessarily the combination opensr-test's own CI uses, and satalign's
+  behaviour on a newer opencv has not been compared.**
+- The upstream README is stale in two ways that matter and both are guarded in
+  code: it documents the return keys as `ha_percent`/`om_percent`/`im_percent`
+  (1.3.3 returns `*_metric`), and its example calls `Metrics(config=...)` when
+  the parameter is `params=` — the documented call **silently discards the
+  config and runs defaults**, verified by test.
+
+### Currently clean, but watch it
+
+- **0 samples were rejected across all methods.** The harness
+  records every rejection with its reason and keeps it in the denominator; the
+  run fails outright above
+  `cfg.opensr_test.max_skipped_fraction=10%`.
+- **Non-finite metric values, by metric:** none.
+  `spatial` is the one to watch: it returns NaN whenever satalign flags the
+  estimated translation as too large. Such a row is kept and its other six
+  metrics are used; only that column's statistics exclude it.
+
+---
+
+## 7. Reproducing this
+
+Note the interpreter. `py -3.11` resolves to a bare Python with none of the
+dependencies and fails with `No module named pytest`, which reads like a broken
+repo rather than the wrong interpreter. Always call the venv explicitly.
 
 ```bash
-# Index (both summaries in reports/)
-py -3.11 scripts/prepare_data.py --config configs/base.yaml --index-only --force \
-    --no-preview --summary-out reports/index_summary_partial.txt \
-    --set sen2naipv2.num_samples=1100
-py -3.11 scripts/prepare_data.py --config configs/base.yaml --index-only --force \
-    --no-preview --summary-out reports/index_summary_full.txt
-
 # Alignment audit
-py -3.11 scripts/qa_alignment.py --config configs/base.yaml --n-pairs 50 --seed 42
+.venv/Scripts/python.exe scripts/qa_alignment.py --config configs/base.yaml \
+    --n-pairs 50 --seed 42
 
-# Estimator self-test (CPU, no network, ~30 s)
-py -3.11 scripts/qa_alignment.py --config configs/base.yaml --smoke
+# Our metrics, both baselines
+.venv/Scripts/python.exe scripts/run_baseline.py --config configs/base.yaml \
+    --baseline all
+
+# External benchmark, both baselines, whole validation split
+.venv/Scripts/python.exe scripts/run_opensr_test.py --config configs/base.yaml \
+    --baseline bicubic --n-samples 0
+.venv/Scripts/python.exe scripts/run_opensr_test.py --config configs/base.yaml \
+    --baseline nearest --n-samples 0
+
+# This report
+.venv/Scripts/python.exe scripts/make_day1_gate.py --config configs/base.yaml
 ```
 
-Test suite: **306 passing** on CPU, no data required (`py -3.11 -m pytest`).
+Pre-flight for the opensr-test path (no network, no data, ~30 s on CPU):
+
+```bash
+.venv/Scripts/python.exe scripts/run_opensr_test.py --smoke
+```
+
+Test suite: `.venv/Scripts/python.exe -m pytest`.

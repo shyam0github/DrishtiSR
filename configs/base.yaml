@@ -513,6 +513,130 @@ baseline:
   sam_vmax_deg: null
   figure_dpi: 110
 
+# opensr-test: the external, third-party benchmark for Sentinel-2 SR.
+#
+# WHY IT IS HERE AND NOT JUST PSNR. Every number in cfg.metrics is ours: we wrote
+# the implementation, chose the data range, and picked the split. A judge has no
+# reason to take any of it on trust. opensr-test (Aybar et al., IEEE JSTARS 2024,
+# ESA OpenSR) is an independent implementation that asks a question PSNR cannot:
+# not "how close is SR to HR" but "is the detail SR invented actually there".
+# That maps directly onto contribution 2, the hallucination map.
+#
+# INPUT CONTRACT -- MEASURED against opensr_test 1.3.3, and asserted in
+# src/eval/opensr_harness.py rather than trusted:
+#   - torch.Tensor only. A numpy array raises AttributeError on .requires_grad.
+#   - (C, H, W), ONE SAMPLE. There is no batch path; (B, C, H, W) raises.
+#   - float32/float64. uint16 raises inside interpolate.
+#   - C >= 3. C == 1 raises: a .squeeze() in apply_upsampling eats the channel.
+#   - SURFACE REFLECTANCE, i.e. digital number / 10000, matching
+#     cfg.dataset.reflectance_scale. This one does NOT raise when it is wrong,
+#     which is why max_reflectance below exists -- see its comment.
+#   - Band order RGBNIR. cfg.dataset.bands is [B04, B03, B02, B08], which is
+#     exactly the order opensr-test's own datasets use, so no remapping is
+#     needed. Verified against the upstream README, which slices [idx, 0:3] and
+#     documents the result as Red, Green, Blue.
+opensr_test:
+  # Kept separate from cfg.metrics: these are a THIRD PARTY's definitions and
+  # must not be tuned to flatter us. Changing anything here changes what the
+  # external benchmark means, so each value below is upstream's default unless
+  # the comment says otherwise and says why.
+  enabled: true
+
+  # cfg.runtime.num_threads still governs the thread count; this is the torch
+  # device opensr-test moves tensors onto. CPU is the working default, per the
+  # project's compute constraints.
+  device: cpu
+
+  # Aggregation for the distance metrics. "pixel" is upstream's default and
+  # needs no patch_size. "patch" additionally requires SQUARE inputs and
+  # patch_size < the image side; "image" collapses each metric to one number.
+  agg_method: pixel
+  patch_size: null
+
+  # Border pixels discarded before scoring. Upstream default is 16, applied to
+  # HR/SR, with border_mask // scale (= 4) applied to LR so the two stay
+  # commensurate. CAVEAT, recorded honestly: upstream's own datasets have
+  # 484-512 px HR patches and ours are 256, so 16 px removes a larger FRACTION
+  # here than it does there -- about 25% of the LR patch area. The value is left
+  # at upstream's default anyway, because a benchmark retuned to suit our patch
+  # size is no longer an external benchmark. If it is ever changed, the change
+  # belongs in the report, not just here.
+  border_mask: 16
+
+  # Resolved to channel indices BY NAME through
+  # src.metrics.image_quality.rgb_band_indices, never assumed to be [0, 1, 2].
+  # Used by opensr-test for the spatial PCC and for the lpips/clip distances.
+  rgb_bands: [B04, B03, B02]
+
+  # Systematic-error removal before the synthesis and correctness metrics.
+  # Upstream defaults, both on: histogram-matches SR to HR, then registers it.
+  # This is what makes "did the model invent detail" separable from "is the
+  # model brighter than HR" -- which is exactly the distinction we need, so it
+  # stays on. Note it means the correctness numbers do NOT penalise a global
+  # radiometric offset; cfg.metrics' SAM and our spectral-consistency loss do.
+  harm_apply_spectral: true
+  harm_apply_spatial: true
+
+  # Spatial consistency. "pcc" (phase correlation) is upstream's default and
+  # needs no extra weights; "lgm" would pull in LightGlue. The threshold is the
+  # maximum translation searched, in LR pixels.
+  spatial_method: pcc
+  spatial_threshold_distance: 5
+  spatial_max_num_keypoints: 500
+
+  # Distance functions, all upstream defaults.
+  #   reflectance: l1  -- absolute, so it MOVES WITH THE INPUT SCALE.
+  #   spectral:    sad -- spectral angle, in DEGREES, scale-invariant.
+  #   synthesis:   l1  -- absolute, also moves with the input scale.
+  #   correctness: nd  -- normalised difference, scale-invariant.
+  reflectance_distance: l1
+  spectral_distance: sad
+  synthesis_distance: l1
+  correctness_distance: nd
+
+  # Correctness normalisation. "softmin" reports the mean soft assignment to
+  # each of the three classes; "percent" reports hard argmax fractions. Either
+  # way the three sum to 1.0, which the harness asserts on every sample.
+  correctness_norm: softmin
+  im_score: 0.05
+  om_score: 0.05
+  ha_score: 0.05
+  correctness_temperature: 0.25
+
+  # Pixels whose LR-to-HR gradient is below this are excluded from the
+  # correctness metrics -- flat water and bare field cannot hallucinate. "auto"
+  # is upstream's default and resolves to the 75th percentile of the per-image
+  # reference distance, so the threshold adapts per tile. A float fixes it.
+  gradient_threshold: auto
+
+  # How many validation samples to score. opensr-test runs ONE SAMPLE AT A TIME
+  # on CPU and performs two image registrations per sample, so this is far
+  # slower than cfg.metrics -- budget seconds per sample, not milliseconds.
+  # null means the whole split.
+  n_samples: 200
+
+  # THE TRIPWIRE FOR A WRONG DIVISOR, and the reason it is not optional.
+  # MEASURED on opensr_test 1.3.3: feeding digital numbers instead of
+  # reflectance does NOT raise. It returns reflectance=2528.2 and
+  # synthesis=2894.1 where the correct answers are 0.0018 and 0.074, while
+  # spectral, ha, om and im are unchanged because they are scale-invariant. A
+  # factor-of-10000 error is therefore invisible in four of the seven metrics
+  # and silently wrong in the other two. So the harness refuses any triplet
+  # whose maximum exceeds this. It is deliberately well above
+  # cfg.dataset.reflectance_valid_max (2.0), because this is a decode-fault
+  # tripwire and NOT a clip: real bright targets above 1.0 must pass through
+  # untouched.
+  max_reflectance: 10.0
+
+  # Samples opensr-test rejects are recorded with their reason and counted, never
+  # dropped from the denominator. If MORE than this fraction is rejected the run
+  # FAILS rather than reporting a number computed on whatever survived. A
+  # benchmark quietly measured on 60% of the split is worse than no benchmark.
+  max_skipped_fraction: 0.10
+
+  json_name: "opensr_{method}.json"
+  csv_name: "opensr_{method}.csv"
+
 # Smoke mode: every entry-point script must accept --smoke and, when set, merge
 # this block over the config so a full run completes in a couple of minutes on CPU.
 #
@@ -566,6 +690,20 @@ smoke:
     # gets uploaded by mistake at 3 a.m.
     staging_dir: outputs/kaggle_staging_smoke
     dryrun_staging_dir: outputs/kaggle_staging_smoke_dryrun
+  opensr_test:
+    # Separate filenames, for exactly the reason the baseline block below gives:
+    # the stub's LR is an exact block mean of its own HR, so its correctness
+    # figures describe that construction rather than super-resolution. A stub
+    # result sitting at the real result's path is a number that gets quoted in a
+    # report later and believed. MEASURED the hard way -- the first smoke run of
+    # scripts/run_opensr_test.py overwrote outputs/metrics/opensr_bicubic.json
+    # with 16 rows of stub scores, and nothing in the file said so.
+    json_name: "opensr_{method}_smoke.json"
+    csv_name: "opensr_{method}_smoke.csv"
+    # 16 patches is the whole stub val split: enough to exercise the batching,
+    # the skip path and the summary, fast enough to stay a pre-flight.
+    n_samples: 16
+
   baseline:
     figure_samples: 3
     # Separate filenames, for the same reason as the alignment block above: a
