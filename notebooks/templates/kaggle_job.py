@@ -66,21 +66,37 @@ print(f"Interpreter {sys.executable}")
 print(f"Python {sys.version}")
 
 # %%
-# 2. Dependencies, and the four functions this notebook is allowed to call.
+# 2. Dependencies, and the five functions this notebook is allowed to call.
 from src.utils.kaggle_session import (
     guard_data_root,
     inventory_outputs,
     pip_install,
     prune_workdir,
     run_entry,
+    stage_supporting_files,
 )
 
 pip_install({{PIP_PACKAGES}}, note="(the Kaggle image already has the rest)")
 
 # %%
-# 3. HARD GUARD. Opens real sample files and checks their shapes and reflectance
-#    ranges. Raises and abandons the run if the data is not readable, so the
-#    expensive cell below never starts against an empty mount.
+# 3. Stage the manifest and split CSVs out of the mounted dataset into outputs/.
+#
+#    The dataset carries the pixels AND these two small CSVs. Nothing used to
+#    copy them across, so a job ran with the imagery present and the split file
+#    absent -- and a missing split file does not fail, it makes the loader
+#    recompute a split in-process. Adjacent NAIP tiles overlap, so a recomputed
+#    split is not the geographic split the baseline was measured on.
+#
+#    This runs BEFORE the guard below, because the guard asserts these two files
+#    are in place. The mount path is resolved by src/utils/paths.py; no mount
+#    location is composed anywhere in this notebook.
+stage_supporting_files({{CONFIG_PATH_LITERAL}})
+
+# %%
+# 4. HARD GUARD. Opens real sample files and checks their shapes and reflectance
+#    ranges, and asserts the two CSVs staged above are present. Raises and
+#    abandons the run if either check fails, so the expensive cell below never
+#    starts against an empty mount or a recomputed split.
 guard_data_root(
     {{GUARD_SCRIPT}},
     args={{GUARD_ARGS}},
@@ -88,16 +104,16 @@ guard_data_root(
 )
 
 # %%
-# 4. The job itself.
+# 5. The job itself.
 run_entry({{ENTRY_SCRIPT_LITERAL}}, args={{ENTRY_ARGS}})
 
 # %%
-# 5. What was produced. Everything under /kaggle/working is retrievable with
+# 6. What was produced. Everything under /kaggle/working is retrievable with
 #    `python scripts/kaggle_run.py fetch --job {{JOB_NAME}}`.
 inventory_outputs({{OUTPUT_DIRS}})
 
 # %%
-# 6. Drop the cloned source tree, so the saved kernel output is results only.
+# 7. Drop the cloned source tree, so the saved kernel output is results only.
 #    Kaggle keeps everything under /kaggle/working; without this, every fetch
 #    also downloads a full copy of the repo. The code is in git at the commit
 #    printed above -- nothing unique is deleted here.

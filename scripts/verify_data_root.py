@@ -447,22 +447,26 @@ def main(argv=None) -> int:
     if npz_paths:
         samples_ok = describe_samples(cfg, npz_paths, int(args.samples), seed)
 
+    # The manifest and the split CSV are REQUIRED, not advisory, and this is the
+    # guard the generated Kaggle notebook runs before every job. They used to be
+    # reported and shrugged off, which is how a job could run with the imagery
+    # present and the split file absent -- and a missing split file does not
+    # fail, it makes the loader recompute a split in-process. Adjacent NAIP
+    # tiles overlap, so a recomputed split is not the geographic split the
+    # baseline was measured on, and every number downstream is then quietly
+    # incomparable. A readable cache without them is not a session that may
+    # start training.
+    supporting_ok = manifest is not None and splits is not None
+
     print()
     print("=" * 78)
-    if npz_paths and samples_ok:
+    if npz_paths and samples_ok and supporting_ok:
         print("  VERDICT: the data is readable. Safe to start training.")
         print("=" * 78)
         print()
         print(f"{INFO}{len(npz_paths):,} samples at {subset_dir}")
-        if manifest is None or splits is None:
-            print()
-            print(
-                f"{INFO}NOTE: the manifest and/or split CSV is missing (see above)."
-            )
-            print(
-                f"{INFO}Pixels are readable, but the split would be recomputed "
-                "rather than read."
-            )
+        print(f"{INFO}Manifest and split CSV both present: the split is READ,")
+        print(f"{INFO}not recomputed.")
         print()
         print("WHAT HAPPENS NEXT")
         print("  1. Run the baseline to confirm the numbers reproduce here:")
@@ -479,13 +483,32 @@ def main(argv=None) -> int:
     if not npz_paths:
         print(f"{INFO}No samples were found. The numbered sections above name")
         print(f"{INFO}every path that was checked; fix the first one marked [!!].")
-    else:
+    elif not samples_ok:
         print(f"{INFO}Samples were found but did not look right. See section 5.")
+    else:
+        # The pixels are fine; what is missing is the provenance. Said
+        # separately because the fix is completely different -- nothing is wrong
+        # with the mount, a file simply was not staged out of it.
+        absent = [
+            name
+            for name, value in (("manifest", manifest), ("split CSV", splits))
+            if value is None
+        ]
+        print(f"{INFO}The samples are readable, but the {' and '.join(absent)} "
+              f"{'is' if len(absent) == 1 else 'are'} missing.")
+        print(f"{INFO}That is a FAILURE, not a warning: without the split CSV the")
+        print(f"{INFO}loader recomputes a split in-process. It is reproducible, but")
+        print(f"{INFO}it is not the geographic split the baseline was measured on,")
+        print(f"{INFO}so any number produced from it is quietly incomparable.")
     print()
     print("WHAT HAPPENS NEXT")
     print("  1. On Kaggle: sidebar -> '+ Add Input' -> attach the dataset named")
     print(f"     {cfg.paths.kaggle_dataset_dir!r}, then re-run this script.")
+    print("     If the samples were readable and only the CSVs were missing, the")
+    print("     dataset was uploaded without them -- re-run make_splits.py, then")
+    print("     kaggle_upload.py stage and push.")
     print("  2. Locally: python scripts/prepare_data.py --config configs/base.yaml")
+    print("     then:    python scripts/make_splits.py --config configs/base.yaml")
     print("  3. If the dataset has never been uploaded:")
     print("     python scripts/kaggle_upload.py survey")
     print()

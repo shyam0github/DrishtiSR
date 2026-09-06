@@ -77,7 +77,11 @@ from kaggle_upload import (  # noqa: E402
     preflight,
     rule,
 )
-from src.utils.config import add_standard_args, load_config  # noqa: E402
+from src.utils.config import (  # noqa: E402
+    DEFAULT_CONFIG,
+    add_standard_args,
+    load_config,
+)
 from src.utils.logging import get_logger  # noqa: E402
 from src.utils.paths import repo_root  # noqa: E402
 from src.utils.seed import seed_everything  # noqa: E402
@@ -642,6 +646,32 @@ def to_notebook(source: str) -> Dict[str, Any]:
     }
 
 
+def config_path_for(job: Any) -> str:
+    """The config path a job's cells should use, taken from the job's own args.
+
+    Derived rather than declared, so a job that runs against a different config
+    cannot end up staging its supporting files from the wrong one. The job's
+    ``entry_args`` are the authority: whatever ``--config`` the entry point is
+    given is what the notebook's staging cell is given too.
+
+    Args:
+        job: The merged job definition.
+
+    Returns:
+        The ``--config`` value from ``entry_args``, falling back to
+        ``guard_args``, and finally to the repository default. The fallback
+        matters for a job whose entry point takes no ``--config`` at all.
+    """
+    for key in ("entry_args", "guard_args"):
+        args = [str(arg) for arg in (job.get(key) or [])]
+        for index, arg in enumerate(args):
+            if arg == "--config" and index + 1 < len(args):
+                return args[index + 1]
+            if arg.startswith("--config="):
+                return arg.split("=", 1)[1]
+    return DEFAULT_CONFIG
+
+
 def build_tokens(
     cfg: Any, job_name: str, job: Any, sha: str, url: str
 ) -> Dict[str, str]:
@@ -683,6 +713,10 @@ def build_tokens(
         "GUARD_SCRIPT": repr(str(job.guard_script)),
         "GUARD_ARGS": repr(guard_args),
         "GUARD_ENABLED": repr(bool(job.guard_data_root)),
+        # The config the staging cell loads to resolve the mount and work out the
+        # manifest/split file names. Taken from the job's own arguments by
+        # config_path_for(), so it cannot disagree with the entry point.
+        "CONFIG_PATH_LITERAL": repr(config_path_for(job)),
         "ENTRY_SCRIPT": entry,
         "ENTRY_SCRIPT_LITERAL": repr(entry),
         "ENTRY_ARGS": repr(entry_args),

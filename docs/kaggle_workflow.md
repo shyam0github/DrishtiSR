@@ -280,19 +280,43 @@ The usual ones:
 | Run "succeeds" in seconds with no outputs | Almost certainly the guard was off and the data root was empty. Turn `guard_data_root` on. |
 | `Cannot access kernel ... permission denied` | Usually means the kernel has never been pushed — not that it is private. |
 
-## Known gap: the manifest and splits are not staged
+## Closed: the manifest and splits are now staged automatically
 
-`verify` passes and the 3,002 cached samples are readable, but the run log shows
-`outputs/manifest_sen2naipv2.csv` and `outputs/splits_sen2naipv2.csv` are *not*
-in the working directory — they sit in the mounted dataset instead. Nothing
-copies them across yet.
+This used to be an open gap. `verify` passed and the 3,002 cached samples were
+readable, but `outputs/manifest_sen2naipv2.csv` and
+`outputs/splits_sen2naipv2.csv` were *not* in the working directory — they sat
+in the mounted dataset and nothing copied them across. Harmless for `verify`,
+which only reports it; **not** harmless for `baseline` or `train`, because
+without the split CSV the loader recomputes a split in-process. That is
+reproducible and completely wrong: adjacent NAIP tiles overlap, so a recomputed
+split is not the geographic split the baseline was measured on, and every
+number downstream is quietly incomparable.
 
-That is harmless for `verify`, which only reports it. It is **not** harmless for
-`baseline` or `train`: without the splits file the loader recomputes a split
-in-process. That is reproducible, but it is not necessarily the split the
-existing baseline numbers were measured on, so results would not be comparable.
+Cell 3 of every generated notebook now calls
+`src.utils.kaggle_session.stage_supporting_files`, which:
 
-Stage those two files into `outputs/` before running either job.
+- resolves the mount through `src/utils/paths.py::kaggle_mount_path` — no
+  `/kaggle/input` path is composed in the notebook or in the staging function,
+  because that layout has already been wrong once here;
+- derives both file names from config (`cfg.dataset.name`,
+  `cfg.splits.output_name`), so switching datasets moves them automatically;
+- copies both into `cfg.paths.manifest_dir`, and **aborts the run** if either is
+  absent, naming the mount searched and listing what is actually in it.
+
+It is in the template rather than in any job, so every job inherits it, and it
+runs *before* the data guard — `scripts/verify_data_root.py` now treats a
+missing manifest or split CSV as a FAILURE alongside its sample check, not as
+the advisory note it used to print. A readable cache with no split file is no
+longer a session that may start training.
+
+Should the abort fire, the dataset was uploaded without the CSVs. Fix it at the
+source rather than by hand-copying in a notebook:
+
+```bash
+python scripts/make_splits.py --config configs/base.yaml
+python scripts/kaggle_upload.py stage
+python scripts/kaggle_upload.py push
+```
 
 Related tooling: [`scripts/kaggle_upload.py`](../scripts/kaggle_upload.py)
 publishes the SEN2NAIPv2 sample cache as the Kaggle Dataset every job mounts.
