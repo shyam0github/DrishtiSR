@@ -1,0 +1,431 @@
+"""Prove that this machine can actually read the data. One command, no arguments.
+
+Run this **first** in every fresh Kaggle session, before anything that costs GPU
+time. It answers the only question that matters at that moment -- "can this
+session see the ~3000 sample pairs, or is it about to train on nothing?" -- and
+it answers it by opening real files, not by checking that a directory exists.
+
+What it checks, in order, stopping at the first real failure:
+
+1. **Path resolution.** Where does ``resolve_data_root`` land, where does
+   ``resolve_cache_dir`` land, and is the Kaggle mount composed from config
+   present? Every candidate path is printed whether or not it was chosen, so a
+   wrong answer is diagnosable without re-running.
+2. **The cache.** How many ``.npz`` sample files are actually there.
+3. **The manifest.** Row count, and whether it agrees with the cache.
+4. **The splits.** Row count per split, because a missing split file means the
+   loader silently recomputes one, and a recomputed split is a different split.
+5. **Real samples.** Three random pairs are loaded and their shapes, dtypes, and
+   **per-band reflectance ranges** printed. This is the part that catches a
+   wrong reflectance divisor, a transposed channel axis, or truncated files --
+   none of which a file count would notice.
+
+Exit code 0 means the session can read the data. Any non-zero exit means do not
+start training.
+
+Examples:
+    python scripts/verify_data_root.py
+    python scripts/verify_data_root.py --samples 10
+    python scripts/verify_data_root.py --smoke     # synthetic stub, no data needed
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import sys
+from collections import Counter
+from pathlib import Path
+from typing import Any, List, Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import numpy as np  # noqa: E402
+
+from src.utils.config import add_standard_args, load_config  # noqa: E402
+from src.utils.logging import get_logger  # noqa: E402
+from src.utils.paths import (  # noqa: E402
+    kaggle_mount_path,
+    repo_root,
+    resolve_cache_dir,
+    resolve_data_root,
+    resolve_output_path,
+)
+from src.utils.seed import seed_everything  # noqa: E402
+
+OK = "  [OK]  "
+BAD = "  [!!]  "
+INFO = "         "
+
+
+def parse_args(argv=None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Prove that this machine (local or Kaggle) can read the sample "
+            "cache: resolve the paths, load the manifest, and open real "
+            "samples."
+        ),
+    )
+    add_standard_args(parser)
+    parser.add_argument(
+        "--samples",
+        type=int,
+        default=3,
+        help="How many random samples to open and describe (default: 3).",
+    )
+    return parser.parse_args(argv)
+
+
+def describe_paths(cfg: Any) -> dict:
+    """Print every path the resolver considered, and what it chose.
+
+    Args:
+        cfg: The loaded config.
+
+    Returns:
+        ``{"data_root": Path|None, "cache_dir": Path|None, "mount": Path|None,
+        "failure": str|None}``. Resolution failure is captured rather than
+        raised so the remaining checks can still report what they see.
+    """
+    print("1. PATH RESOLUTION")
+    print()
+    print(f"{INFO}repository root:  {repo_root()}")
+
+    mount = kaggle_mount_path(cfg)
+    if mount is None:
+        print(
+            f"{INFO}Kaggle mount:     not configured "
+            "(paths.kaggle_mount_root / paths.kaggle_dataset_dir)"
+        )
+    else:
+        if mount.is_dir():
+            entries = list(mount.iterdir())
+            if entries:
+                print(f"{OK}Kaggle mount:     {mount}  ({len(entries)} entries)")
+            else:
+                print(f"{BAD}Kaggle mount:     {mount}  EXISTS BUT IS EMPTY")
+        else:
+            print(f"{INFO}Kaggle mount:     {mount}  (not present -- normal off Kaggle)")
+
+    result: dict = {"mount": mount, "failure": None, "data_root": None, "cache_dir": None}
+
+    try:
+        data_root = resolve_data_root(cfg)
+        result["data_root"] = data_root
+        print(f"{OK}data root:        {data_root}")
+    except (FileNotFoundError, NotADirectoryError, KeyError, ValueError) as exc:
+        result["failure"] = str(exc)
+        print(f"{BAD}data root:        COULD NOT BE RESOLVED")
+        print()
+        for line in str(exc).splitlines():
+            print(f"{INFO}{line}")
+
+    cache_dir = Path(resolve_cache_dir(cfg))
+    result["cache_dir"] = cache_dir
+    print(f"{OK}cache directory:  {cache_dir}")
+    return result
+
+
+def cache_subset_dir(cfg: Any, cache_dir: Path) -> Path:
+    """The subset folder inside the cache, matching what the loader computes."""
+    name = str(cfg.dataset.name)
+    section = cfg.get(name) if hasattr(cfg, "get") else None
+    subset = None if section is None else section.get("subset")
+    return cache_dir / str(subset or name)
+
+
+def check_cache(cfg: Any, cache_dir: Path) -> tuple:
+    """Count the cached sample files.
+
+    Returns:
+        ``(subset_dir, npz_paths)``. ``npz_paths`` is empty when nothing is
+        cached, which the caller treats as a failure.
+    """
+    print()
+    print("2. SAMPLE CACHE")
+    print()
+    subset_dir = cache_subset_dir(cfg, cache_dir)
+    print(f"{INFO}looking in: {subset_dir}")
+
+    if not subset_dir.is_dir():
+        print(f"{BAD}That directory does not exist.")
+        print(f"{INFO}On Kaggle this means the dataset is not attached, or is")
+        print(f"{INFO}attached under a name that differs from")
+        print(f"{INFO}paths.kaggle_dataset_dir={cfg.paths.kaggle_dataset_dir!r}.")
+        print(f"{INFO}Locally it means the cache has not been downloaded yet:")
+        print(f"{INFO}  python scripts/prepare_data.py --config configs/base.yaml")
+        return subset_dir, []
+
+    npz_paths = sorted(subset_dir.rglob("*.npz"))
+    sidecars = sorted(subset_dir.rglob("*.json"))
+    if not npz_paths:
+        print(f"{BAD}No .npz sample files found.")
+        return subset_dir, []
+
+    total = sum(p.stat().st_size for p in npz_paths)
+    print(f"{OK}{len(npz_paths):,} .npz sample files  ({total / 1024**3:,.2f} GB)")
+    print(f"{INFO}{len(sidecars):,} .json sidecars")
+    if len(sidecars) != len(npz_paths):
+        print(
+            f"{BAD}Sidecar count does not match sample count -- an interrupted "
+            "download or a partial upload."
+        )
+    return subset_dir, npz_paths
+
+
+def check_manifest(cfg: Any, cached_count: int) -> Optional[List[dict]]:
+    """Load the manifest and report its row count.
+
+    Returns:
+        The rows, or ``None`` when the manifest is absent. Absence is a warning
+        rather than a hard failure: the cache is still readable, but the split
+        provenance is not.
+    """
+    print()
+    print("3. MANIFEST")
+    print()
+    manifest_dir = Path(resolve_output_path(cfg, "manifest_dir"))
+    path = manifest_dir / f"manifest_{cfg.dataset.name}.csv"
+    print(f"{INFO}looking for: {path}")
+
+    if not path.is_file():
+        print(f"{BAD}Not found.")
+        mount = kaggle_mount_path(cfg)
+        if mount is not None and (mount / path.name).is_file():
+            print(f"{INFO}It IS present in the mounted dataset. Copy it across:")
+            print(f"{INFO}  !mkdir -p outputs && cp {mount}/*.csv outputs/")
+        else:
+            print(f"{INFO}Generate it with:")
+            print(f"{INFO}  python scripts/prepare_data.py --config configs/base.yaml")
+        return None
+
+    with path.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    print(f"{OK}{len(rows):,} rows")
+
+    rejected = sum(1 for r in rows if str(r.get("rejected", "")).lower() == "true")
+    errors = sum(1 for r in rows if r.get("validation_error"))
+    print(f"{INFO}{rejected:,} rejected by policy, {errors:,} with a validation error")
+
+    if cached_count and len(rows) != cached_count:
+        print(
+            f"{BAD}Manifest has {len(rows):,} rows but {cached_count:,} samples "
+            "are cached -- these describe different sets of data."
+        )
+    return rows
+
+
+def check_splits(cfg: Any) -> Optional[dict]:
+    """Load the split CSV and report the per-split counts.
+
+    Returns:
+        ``{split_name: count}``, or ``None`` when the file is absent.
+    """
+    print()
+    print("4. TRAIN / VAL / TEST SPLIT")
+    print()
+    manifest_dir = Path(resolve_output_path(cfg, "manifest_dir"))
+    path = manifest_dir / str(cfg.splits.output_name).format(dataset=cfg.dataset.name)
+    print(f"{INFO}looking for: {path}")
+
+    if not path.is_file():
+        print(f"{BAD}Not found.")
+        mount = kaggle_mount_path(cfg)
+        if mount is not None and (mount / path.name).is_file():
+            print(f"{INFO}It IS present in the mounted dataset. Copy it across:")
+            print(f"{INFO}  !mkdir -p outputs && cp {mount}/*.csv outputs/")
+        else:
+            print(f"{INFO}Generate it with:")
+            print(f"{INFO}  python scripts/make_splits.py --config configs/base.yaml")
+        print(
+            f"{INFO}Without it the loader recomputes a split in-process. That is "
+            "reproducible,"
+        )
+        print(
+            f"{INFO}but it is not necessarily the split your existing results "
+            "were measured on."
+        )
+        return None
+
+    with path.open("r", newline="", encoding="utf-8") as handle:
+        counts = Counter(row["split"] for row in csv.DictReader(handle))
+    print(f"{OK}{sum(counts.values()):,} samples assigned")
+    for name, count in sorted(counts.items()):
+        print(f"{INFO}  {name:<8} {count:,}")
+    return dict(counts)
+
+
+def describe_samples(cfg: Any, npz_paths: List[Path], count: int, seed: int) -> bool:
+    """Open random samples and print shapes and per-band reflectance ranges.
+
+    This is the check that cannot be faked by a directory listing. It converts
+    raw digital numbers to reflectance exactly as the loader does -- mask nodata,
+    then divide by ``cfg.dataset.reflectance_scale`` -- and prints the resulting
+    range per band. A wrong divisor, a transposed channel axis, or a truncated
+    file all show up here as obviously wrong numbers.
+
+    Args:
+        cfg: The loaded config.
+        npz_paths: Candidate sample files.
+        count: How many to open.
+        seed: Seed for the random choice, so the check is reproducible.
+
+    Returns:
+        True when every opened sample looked physically plausible.
+    """
+    print()
+    print(f"5. REAL SAMPLES ({min(count, len(npz_paths))} chosen at random)")
+
+    bands = [str(b) for b in cfg.dataset.bands]
+    scale = float(cfg.dataset.reflectance_scale)
+    nodata = int(cfg.dataset.nodata_value)
+    valid_max = float(cfg.dataset.reflectance_valid_max)
+
+    rng = np.random.default_rng(seed)
+    chosen = [
+        npz_paths[i]
+        for i in rng.choice(
+            len(npz_paths), size=min(count, len(npz_paths)), replace=False
+        )
+    ]
+
+    all_good = True
+    for path in chosen:
+        print()
+        print(f"{INFO}{path.name}")
+        try:
+            with np.load(path) as payload:
+                arrays = {key: payload[key] for key in payload.files}
+        except (OSError, ValueError) as exc:
+            print(f"{BAD}Could not read it: {exc}")
+            print(f"{INFO}A truncated file -- the upload or download was cut short.")
+            all_good = False
+            continue
+
+        for key in sorted(arrays):
+            array = arrays[key]
+            print(f"{INFO}  {key}: shape {tuple(array.shape)}, dtype {array.dtype}")
+            if array.ndim != 3 or array.shape[0] != len(bands):
+                print(
+                    f"{BAD}  Expected (C, H, W) with C={len(bands)} to match "
+                    f"cfg.dataset.bands. Got {tuple(array.shape)}."
+                )
+                all_good = False
+                continue
+
+            masked = np.where(array == nodata, np.nan, array.astype(np.float32))
+            reflectance = masked / scale
+            nodata_pixels = int(np.isnan(reflectance).sum())
+
+            for index, band in enumerate(bands):
+                plane = reflectance[index]
+                finite = plane[np.isfinite(plane)]
+                if finite.size == 0:
+                    print(f"{BAD}    {band}: entirely nodata")
+                    all_good = False
+                    continue
+                low, high, mean = finite.min(), finite.max(), finite.mean()
+                flag = ""
+                if high > valid_max:
+                    flag = f"  <-- ABOVE cfg.dataset.reflectance_valid_max={valid_max:g}"
+                    all_good = False
+                elif high > 1.0:
+                    flag = "  (bright target; above 1.0 is legal and unclipped)"
+                print(
+                    f"{INFO}    {band}: reflectance "
+                    f"[{low:.4f}, {high:.4f}]  mean {mean:.4f}{flag}"
+                )
+            if nodata_pixels:
+                fraction = nodata_pixels / reflectance.size
+                print(
+                    f"{INFO}    {nodata_pixels:,} nodata pixels "
+                    f"({fraction:.2%}), masked before scaling"
+                )
+
+    print()
+    print(
+        f"{INFO}Reflectance is digital_number / {scale:g} with {nodata} masked "
+        "first."
+    )
+    print(
+        f"{INFO}Band order is {', '.join(bands)} -- red first, NIR last. Typical "
+        "vegetation"
+    )
+    print(f"{INFO}reads about R 0.06, G 0.06, B 0.03, NIR 0.25.")
+    return all_good
+
+
+def main(argv=None) -> int:
+    args = parse_args(argv)
+    cfg = load_config(args.config, smoke=args.smoke, overrides=args.overrides)
+
+    logger = get_logger("verify_data_root", log_file=cfg.paths.log_file)
+    seed = seed_everything(cfg.seed)
+
+    print()
+    print("=" * 78)
+    print("  CAN THIS SESSION READ THE DATA?")
+    print("=" * 78)
+    print()
+    print(f"{INFO}dataset: {cfg.dataset.name}")
+    print(f"{INFO}config:  {args.config}")
+    print()
+
+    resolved = describe_paths(cfg)
+    subset_dir, npz_paths = check_cache(cfg, resolved["cache_dir"])
+    manifest = check_manifest(cfg, len(npz_paths))
+    splits = check_splits(cfg)
+
+    samples_ok = False
+    if npz_paths:
+        samples_ok = describe_samples(cfg, npz_paths, int(args.samples), seed)
+
+    print()
+    print("=" * 78)
+    if npz_paths and samples_ok:
+        print("  VERDICT: the data is readable. Safe to start training.")
+        print("=" * 78)
+        print()
+        print(f"{INFO}{len(npz_paths):,} samples at {subset_dir}")
+        if manifest is None or splits is None:
+            print()
+            print(
+                f"{INFO}NOTE: the manifest and/or split CSV is missing (see above)."
+            )
+            print(
+                f"{INFO}Pixels are readable, but the split would be recomputed "
+                "rather than read."
+            )
+        print()
+        print("WHAT HAPPENS NEXT")
+        print("  1. Run the baseline to confirm the numbers reproduce here:")
+        print("     python scripts/run_baseline.py --config configs/base.yaml "
+              "--baseline bicubic")
+        print("  2. Then start training.")
+        print()
+        logger.info("Data root verified: %d samples at %s", len(npz_paths), subset_dir)
+        return 0
+
+    print("  VERDICT: THE DATA IS NOT READABLE. Do not start training.")
+    print("=" * 78)
+    print()
+    if not npz_paths:
+        print(f"{INFO}No samples were found. The numbered sections above name")
+        print(f"{INFO}every path that was checked; fix the first one marked [!!].")
+    else:
+        print(f"{INFO}Samples were found but did not look right. See section 5.")
+    print()
+    print("WHAT HAPPENS NEXT")
+    print("  1. On Kaggle: sidebar -> '+ Add Input' -> attach the dataset named")
+    print(f"     {cfg.paths.kaggle_dataset_dir!r}, then re-run this script.")
+    print("  2. Locally: python scripts/prepare_data.py --config configs/base.yaml")
+    print("  3. If the dataset has never been uploaded:")
+    print("     python scripts/kaggle_upload.py survey")
+    print()
+    logger.error("Data root verification FAILED (cache=%s)", subset_dir)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

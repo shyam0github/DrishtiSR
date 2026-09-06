@@ -70,6 +70,21 @@ onnxruntime==1.20.1
 # is safe and avoids any chance of it resolving a different torch.
 lpips==0.1.4
 
+# --- Publishing the sample cache as a Kaggle Dataset ---
+# Official Kaggle API client, driven by scripts/kaggle_upload.py -- you never
+# type `kaggle` yourself. LOCAL ONLY: Kaggle notebooks already have it, and the
+# script never runs there (the upload goes FROM this machine TO Kaggle).
+#
+# Needs an API token at ~/.kaggle/kaggle.json, from
+# https://www.kaggle.com/settings/account -> API -> Create New Token.
+# Every subcommand checks for it first and explains this if it is missing.
+#
+# VERIFIED 2.2.4: `datasets create` supports -p/--dir-mode/--keep-tabular and
+# `datasets files --format csv --page-size` for the dry-run layout check. The
+# script always invokes it as `python -m kaggle`, never the bare `kaggle`
+# executable, which is NOT on PATH on this machine.
+kaggle==2.2.4
+
 # --- Dev / test ---
 pytest==8.3.4
 

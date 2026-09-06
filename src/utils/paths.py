@@ -9,9 +9,15 @@ is derived from one of the two functions here; no module may hardcode a root.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
-__all__ = ["resolve_data_root", "repo_root", "resolve_cache_dir", "resolve_output_path"]
+__all__ = [
+    "resolve_data_root",
+    "repo_root",
+    "resolve_cache_dir",
+    "resolve_output_path",
+    "kaggle_mount_path",
+]
 
 # Order matters: Kaggle wins, so a notebook never silently trains off a stale
 # local mirror that happens to be visible through a mounted drive.
@@ -37,14 +43,29 @@ def resolve_data_root(cfg: Any) -> Path:
 
     1. ``cfg.paths.data_root`` -- an explicit override. If set (non-null) it wins
        unconditionally and must exist.
-    2. ``cfg.paths.kaggle_data_root`` -- normally ``/kaggle/input``.
-    3. ``cfg.paths.local_data_root`` -- the local Windows mirror.
+    2. **The mounted Kaggle Dataset**,
+       ``{cfg.paths.kaggle_mount_root}/{cfg.paths.kaggle_dataset_dir}`` -- the
+       cache published by ``scripts/kaggle_upload.py``. Skipped when either key
+       is absent, and **rejected when the directory exists but is empty**.
+    3. ``cfg.paths.kaggle_data_root`` -- normally ``/kaggle/input``.
+    4. ``cfg.paths.local_data_root`` -- the local Windows mirror.
 
-    The first candidate that is an existing directory is returned. There is no
-    fallback beyond the list and no directory is created: a missing data root is
-    a hard error, because every downstream failure mode it produces (empty
-    dataset, zero-length loader, silently skipped split) is far harder to debug
-    than an exception here.
+    The first candidate that is an existing, non-empty directory is returned.
+    There is no fallback beyond the list and no directory is created: a missing
+    data root is a hard error, because every downstream failure mode it produces
+    (empty dataset, zero-length loader, silently skipped split) is far harder to
+    debug than an exception here.
+
+    Why the emptiness check on candidate 2 specifically
+    ---------------------------------------------------
+    ``/kaggle/input`` exists on **every** Kaggle notebook, whether or not a
+    dataset is attached. Resolving to it unconditionally is the single most
+    dangerous thing this function could do: the run starts, the loader reports
+    zero samples, training "succeeds" in nine seconds, and nothing anywhere says
+    the data was never mounted. Composing the full mount path and requiring it to
+    contain something turns that silent no-op into an exception naming the
+    dataset that was expected -- which is the whole reason the slug lives in
+    config rather than being assumed.
 
     Args:
         cfg: The loaded config. Any mapping with a ``paths`` section works --
@@ -55,10 +76,14 @@ def resolve_data_root(cfg: Any) -> Path:
         An absolute, resolved :class:`~pathlib.Path` to an existing directory.
 
     Raises:
-        KeyError: ``cfg`` has no ``paths`` section, or a candidate key is absent.
+        KeyError: ``cfg`` has no ``paths`` section, or a required candidate key
+            (``kaggle_data_root``, ``local_data_root``) is absent.
         ValueError: A candidate is present but empty/blank.
         NotADirectoryError: The explicit ``data_root`` override does not exist.
-        FileNotFoundError: Neither candidate root exists on this machine.
+        FileNotFoundError: No candidate resolved. The message lists **every**
+            path that was checked and why each one was rejected -- missing, not a
+            directory, or present but empty -- so the failure is diagnosable from
+            the traceback alone without re-running anything.
     """
     paths = _require_section(cfg, "paths")
 
@@ -73,21 +98,91 @@ def resolve_data_root(cfg: Any) -> Path:
             )
         return candidate.resolve()
 
-    candidates = [
-        (key, _as_path(_get(paths, key, required=True), f"paths.{key}"))
+    candidates: list = []
+    mount = kaggle_mount_path(cfg)
+    if mount is not None:
+        candidates.append(("paths.kaggle_mount_root/kaggle_dataset_dir", mount))
+    candidates += [
+        (f"paths.{key}", _as_path(_get(paths, key, required=True), f"paths.{key}"))
         for key in _CANDIDATE_KEYS
     ]
 
-    for _key, candidate in candidates:
-        if candidate.is_dir():
-            return candidate.resolve()
+    rejections = []
+    for label, candidate in candidates:
+        if not candidate.exists():
+            rejections.append(f"{label}={str(candidate)!r} (does not exist)")
+            continue
+        if not candidate.is_dir():
+            rejections.append(f"{label}={str(candidate)!r} (exists but is not a directory)")
+            continue
+        if _is_empty_dir(candidate):
+            # Only the composed Kaggle mount is rejected for being empty. The
+            # other candidates keep their historical "exists is enough" contract:
+            # a local data root is legitimately empty before the first download.
+            if label.startswith("paths.kaggle_mount_root"):
+                rejections.append(
+                    f"{label}={str(candidate)!r} (mounted but EMPTY -- the "
+                    "dataset is attached under the wrong name, is still syncing, "
+                    "or was uploaded empty)"
+                )
+                continue
+        return candidate.resolve()
 
-    tried = ", ".join(f"paths.{key}={str(path)!r}" for key, path in candidates)
+    tried = "\n  - ".join(rejections)
     raise FileNotFoundError(
-        f"No data root found. Tried, in order: {tried}. "
-        "On Kaggle, attach the dataset so it mounts under /kaggle/input. "
-        "Locally, create the directory or point paths.local_data_root at it."
+        "No usable data root found. Checked, in order:\n  - "
+        + tried
+        + "\n\nOn Kaggle: open the notebook sidebar, click '+ Add Input', and "
+        "attach the dataset whose name matches paths.kaggle_dataset_dir "
+        f"({_get(paths, 'kaggle_dataset_dir', required=False)!r}); build and push "
+        "it with `python scripts/kaggle_upload.py upload`.\n"
+        "Locally: create the directory, or point paths.local_data_root at it.\n"
+        "Either way, run `python scripts/verify_data_root.py` to confirm the "
+        "data is visible before starting a training run."
     )
+
+
+def kaggle_mount_path(cfg: Any) -> Optional[Path]:
+    """The Kaggle Dataset mount path composed from config, or None.
+
+    The path a Kaggle Dataset appears at is
+    ``{paths.kaggle_mount_root}/{paths.kaggle_dataset_dir}``. Note that the mount
+    uses the dataset **name only** -- there is no owner prefix -- even though the
+    API slug that created it is ``"<username>/<name>"``.
+
+    This is the one place that composition happens. Nothing hardcodes
+    ``/kaggle/input`` or the dataset name, so renaming the dataset is a config
+    edit rather than a code search.
+
+    Args:
+        cfg: The loaded config, or any mapping with a ``paths`` section.
+
+    Returns:
+        The composed path, or ``None`` when either key is absent or null -- which
+        is the correct state for a config that predates the upload tooling, and
+        makes the mount candidate simply not apply.
+
+    Raises:
+        KeyError: ``cfg`` has no ``paths`` section.
+        ValueError: A key is present but blank.
+    """
+    paths = _require_section(cfg, "paths")
+    root = _get(paths, "kaggle_mount_root", required=False)
+    name = _get(paths, "kaggle_dataset_dir", required=False)
+    if root is None or name is None:
+        return None
+    return _as_path(root, "paths.kaggle_mount_root") / _as_path(
+        name, "paths.kaggle_dataset_dir"
+    )
+
+
+def _is_empty_dir(path: Path) -> bool:
+    """True when ``path`` is a directory containing nothing.
+
+    Errors are not swallowed: an unreadable directory raises, because "I could
+    not tell" must never be reported as "it is fine".
+    """
+    return not any(path.iterdir())
 
 
 def resolve_output_path(cfg: Any, key: str) -> Path:
@@ -118,25 +213,43 @@ def resolve_output_path(cfg: Any, key: str) -> Path:
 
 
 def resolve_cache_dir(cfg: Any) -> Path:
-    """Resolve the sample cache directory, preferring Kaggle's scratch space.
+    """Resolve the sample cache directory.
 
-    On Kaggle, ``/kaggle/temp`` is fast and does not count against the 20 GB
-    ``/kaggle/working`` output quota, so a multi-GB image cache belongs there and
-    not in the repository. Detection keys off the existence of ``/kaggle``, not
-    off an environment variable, because the notebook environment does not set a
-    reliable one.
+    Resolution order:
 
-    Falls back to ``cfg.paths.cache_dir`` (relative values resolve against
-    :func:`repo_root`). The directory is created if missing -- unlike the data
-    root, a cache is ours to create.
+    1. **The mounted Kaggle Dataset**, when
+       ``{paths.kaggle_mount_root}/{paths.kaggle_dataset_dir}`` exists and is
+       non-empty. This is the whole point of ``scripts/kaggle_upload.py``: the
+       ~3000 SEN2NAIPv2 pairs are already there, so ``is_cached()`` returns True
+       for every sample and the notebook never re-downloads (MEASURED at
+       ~10.4 s/sample, i.e. ~8.7 hours of session time). The mount is
+       **read-only** and is returned without any attempt to create it.
+    2. ``cfg.paths.kaggle_cache_dir`` when ``/kaggle`` exists -- normally
+       ``/kaggle/temp``, which is fast and does not count against the 20 GB
+       ``/kaggle/working`` output quota. This is the path a *download* run on
+       Kaggle uses, i.e. when no dataset has been attached yet.
+    3. ``cfg.paths.cache_dir`` -- the local cache. Relative values resolve
+       against :func:`repo_root`.
+
+    Detection keys off directory existence, not an environment variable, because
+    the Kaggle notebook environment does not set a reliable one.
+
+    Cases 2 and 3 create the directory if missing -- unlike the data root, a
+    writable cache is ours to create. Case 1 never creates anything.
 
     Args:
         cfg: The loaded config.
 
     Returns:
-        An absolute path to an existing, writable directory.
+        An absolute path to an existing directory. Writable in cases 2 and 3;
+        **read-only** in case 1, which is correct -- everything is already
+        cached, so nothing needs to write.
     """
     paths = _require_section(cfg, "paths")
+
+    mount = kaggle_mount_path(cfg)
+    if mount is not None and mount.is_dir() and not _is_empty_dir(mount):
+        return mount.resolve()
 
     if Path("/kaggle").is_dir():
         kaggle_cache = _get(paths, "kaggle_cache_dir", required=False)

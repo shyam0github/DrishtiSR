@@ -23,6 +23,26 @@ paths:
   # Candidate roots, tried in this order by resolve_data_root().
   # Kaggle mounts competition/dataset inputs read-only under /kaggle/input.
   kaggle_data_root: /kaggle/input
+
+  # THE UPLOADED CACHE, mounted on Kaggle. A Kaggle Dataset attached to a
+  # notebook appears at {kaggle_mount_root}/{kaggle_dataset_dir} -- note the
+  # mount path uses the dataset NAME only, with no owner prefix, even though the
+  # API slug is "<username>/<name>".
+  #
+  # These two keys are what make resolve_data_root() and resolve_cache_dir()
+  # find the ~3000 pre-downloaded SEN2NAIPv2 pairs instead of re-fetching them
+  # over 8 hours of notebook time. Built and pushed by scripts/kaggle_upload.py.
+  #
+  # WHY THIS IS NOT JUST kaggle_data_root=/kaggle/input: that directory EXISTS
+  # on every Kaggle notebook, attached dataset or not. Resolving to it would let
+  # a training run start against an empty tree and report zero samples as though
+  # that were a valid result. The resolver therefore composes the full mount
+  # path including the dataset name, and REJECTS it when it is missing or empty.
+  kaggle_mount_root: /kaggle/input
+  # MUST equal kaggle.dataset_slug below. tests/test_kaggle_upload.py asserts it:
+  # if they drift, the upload lands at one path and the resolver looks at
+  # another, and the only symptom is an empty dataset.
+  kaggle_dataset_dir: drishtisr-sen2naipv2-cache
   # Local Windows mirror of the same tree. Forward slashes are intentional:
   # pathlib handles them correctly on Windows and they survive YAML unescaped.
   local_data_root: D:/SIH/DrishtiSR/data
@@ -41,6 +61,10 @@ paths:
   metric_dir: outputs/metrics
   manifest_dir: outputs
   log_file: outputs/run.log
+  # Progress log for the real Kaggle upload, written with timestamps so it can
+  # be tailed from a second window while a multi-hour transfer runs unattended:
+  #   Get-Content -Path outputs/upload.log -Wait -Tail 20
+  upload_log: outputs/upload.log
 
 dataset:
   # Key into src/data/registry.py. Switching datasets is a change to THIS LINE
@@ -518,6 +542,13 @@ smoke:
       # backbone weights on first use. The other four metrics exercise the whole
       # Evaluator path, so nothing about the pre-flight is weakened by this.
       enabled: false
+  kaggle:
+    # Separate staging folders, for the same reason the figure and metric names
+    # are separated above: a --smoke run fabricates FAKE samples, and a folder
+    # of fake .npz sitting at the real staging path is exactly the thing that
+    # gets uploaded by mistake at 3 a.m.
+    staging_dir: outputs/kaggle_staging_smoke
+    dryrun_staging_dir: outputs/kaggle_staging_smoke_dryrun
   baseline:
     figure_samples: 3
     # Separate filenames, for the same reason as the alignment block above: a
@@ -533,6 +564,81 @@ synthetic_stub:
   # In-memory fake used by --smoke and by the contract tests. Never downloads.
   num_samples: 4
   seed: 0
+
+# Publishing the local sample cache as a Kaggle Dataset, so a GPU notebook reads
+# ~3000 pre-downloaded SEN2NAIPv2 pairs from a read-only mount instead of
+# re-fetching them (MEASURED at ~10.4 s/sample, i.e. ~8.7 h) inside the session.
+# Driven entirely by scripts/kaggle_upload.py -- no shell one-liners, no JSON
+# edited by hand.
+kaggle:
+  # Dataset NAME, no owner prefix. The API slug is "<username>/<dataset_slug>",
+  # with the username read out of the credentials file below; the Kaggle mount
+  # path uses this bare name (see paths.kaggle_dataset_dir, which must match).
+  #
+  # Kaggle's rules, enforced by scripts/kaggle_upload.py BEFORE any upload
+  # starts, because finding out after a 3.9 GB transfer is the expensive way:
+  # lowercase letters, digits and hyphens only, 6-50 characters.
+  dataset_slug: drishtisr-sen2naipv2-cache
+  # Shown on the dataset page. Kaggle rejects titles under 6 characters.
+  dataset_title: DrishtiSR SEN2NAIPv2 Cache
+
+  # Separate slug and staging folder for the `dryrun` subcommand, so a 5-sample
+  # test upload can never collide with, or overwrite, the real dataset.
+  dryrun_slug: drishtisr-sen2naipv2-dryrun
+  dryrun_title: DrishtiSR SEN2NAIPv2 Dry Run
+  dryrun_samples: 5
+
+  # Staging folders, relative to the repository root. Gitignored via outputs/.
+  # Staging COPIES rather than moves: a failed upload must never be able to
+  # damage the only copy of an 8.7-hour download.
+  staging_dir: outputs/kaggle_staging
+  dryrun_staging_dir: outputs/kaggle_staging_dryrun
+
+  # Refuse to stage unless this much free space remains AFTER the copy.
+  free_space_margin_gb: 2.0
+
+  # Private by default. A Sentinel-2/NAIP derivative is redistributable, but
+  # publishing it is a decision to make deliberately on the dataset page, not a
+  # side effect of running an upload script.
+  is_private: true
+  licence: CC0-1.0
+
+  # Where the Kaggle API token lives. "~" expands to the user's home directory.
+  # Created by downloading kaggle.json from
+  # https://www.kaggle.com/settings/account -> API -> Create New Token.
+  credentials_file: ~/.kaggle/kaggle.json
+
+  # checksums.csv covers every staged file so a truncated upload is detectable
+  # on the Kaggle side. blake2b is roughly 3x faster than sha256 on CPU and this
+  # runs over ~3.9 GB; 16 bytes of digest is ample for detecting corruption
+  # (it is not, and does not need to be, a defence against a forged file).
+  checksum_algorithm: blake2b
+  checksum_digest_bytes: 16
+  checksum_chunk_bytes: 4194304
+
+  # Upload-time estimates are printed at these link speeds, in Mbps. Home
+  # connections are asymmetric: quote UPLOAD speed, which is usually far below
+  # the advertised download figure.
+  upload_speeds_mbps: [5, 20, 50]
+
+  # Programmatic verification after `dryrun`: poll `kaggle datasets files`
+  # until Kaggle has finished unpacking the upload, then check that the .npz
+  # files came back NESTED inside the subset folder rather than flat. This is
+  # what proves --dir-mode zip round-tripped, without opening a browser.
+  # Kaggle's server-side processing is usually well under a minute but is
+  # occasionally backed up, hence the generous ceiling.
+  verify_timeout_s: 600
+  verify_poll_interval_s: 15
+  # Kaggle pages `datasets files` at 200 entries. The full cache is 6008
+  # files = 31 pages, so a single-page read would report a complete upload
+  # as 3% arrived. This ceiling stops a runaway loop if paging misbehaves;
+  # exceeding it is logged as an INCOMPLETE listing, never as a pass.
+  max_listing_pages: 100
+
+  # Seconds before a kaggle CLI call is treated as hung. The real upload needs a
+  # long ceiling -- 3.9 GB at 5 Mbps is nearly two hours.
+  cli_timeout_s: 14400
+  metadata_timeout_s: 120
 
 runtime:
   # Deployment target: INT8 ONNX on CPU. Enforced by the export/benchmark scripts.

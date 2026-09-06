@@ -29,6 +29,13 @@ venv/
 .DS_Store
 Thumbs.db
 
+# Credentials. kaggle.json normally lives in ~/.kaggle/, outside the repo, but a
+# copy dropped in here would be an API key published to GitHub. Ignored
+# everywhere, unconditionally.
+kaggle.json
+**/kaggle.json
+.kaggle/
+
 # Run artefacts -- ignore the contents, keep the directory skeleton.
 # This block is last on purpose: the negations must win over `checkpoints/` above.
 outputs/**

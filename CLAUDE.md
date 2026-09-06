@@ -18,10 +18,51 @@ them, say so instead of working around them.
   resumable and log enough that a run never has to be repeated to answer a
   question.
 - **The local machine has no working CUDA.** All local execution is CPU-only,
-  Windows 11, Python 3.11. Anything that must run locally — tests, data
-  inspection, export, benchmarking, figure generation — must complete on CPU.
+  Windows 11. Anything that must run locally — tests, data inspection, export,
+  benchmarking, figure generation — must complete on CPU.
 - Code must never assume a GPU exists. Select the device from availability, and
   make CPU the working default path, not a degraded fallback.
+
+### Python versions — a known local/remote divergence, watch for it
+
+| where | version | notes |
+|---|---|---|
+| **local project venv** `D:\SIH\DrishtiSR\.venv` | **3.11.9** | The only working local environment. |
+| Kaggle notebooks | **3.11** | Matches the venv at `MAJOR.MINOR`. |
+| local system `py -3.11` | 3.11.9 | **Bare.** No torch, omegaconf, pytest, or kaggle. |
+| local `py -3.14` | 3.14.3 | Has torch but **not** omegaconf. Not a project env. |
+
+MEASURED on this machine, and the reason this table exists:
+
+- `py -3.11 -m pytest` — which earlier versions of this file prescribed — **does
+  not work**. That resolves to
+  `C:\Users\shayamji\AppData\Local\Python\pythoncore-3.11-64\python.exe`, which
+  has none of the dependencies. It fails with `No module named pytest`, which
+  reads like a broken repo rather than the wrong interpreter.
+- Three interpreters answer to some form of "python" here. Two of them are
+  traps. Package installs land in whichever one was invoked, which is how
+  `kaggle` ended up installed under 3.14 while the project venv could not
+  import it.
+
+**Therefore, always invoke the venv interpreter explicitly**, and never a bare
+`python`, `py`, or a console script from `Scripts/` that may belong to a
+different interpreter:
+
+```
+D:\SIH\DrishtiSR\.venv\Scripts\python.exe -m pytest
+D:\SIH\DrishtiSR\.venv\Scripts\python.exe -m pip install <package>
+D:\SIH\DrishtiSR\.venv\Scripts\python.exe scripts/<script>.py
+```
+
+The same rule applies inside the code: subprocess calls to Python tooling use
+`[sys.executable, "-m", "<module>"]`, never a bare executable name. See
+`scripts/kaggle_upload.py::kaggle_command` — the bare `kaggle` executable is not
+on PATH here, and `python -m kaggle` through `sys.executable` is what makes the
+tool work regardless.
+
+The version gap that actually matters is small (both sides are 3.11), so
+language-level incompatibility is not the risk. **The risk is running local code
+with the wrong local interpreter** and concluding the code is broken.
 
 ### Model budget
 
@@ -114,4 +155,6 @@ reports/       Write-ups and submission material.
 outputs/       Gitignored: figures/, metrics/, checkpoints/, run.log.
 ```
 
-Run tests with `py -3.11 -m pytest` from the repository root.
+Run tests with `D:\SIH\DrishtiSR\.venv\Scripts\python.exe -m pytest` from the
+repository root. NOT `py -3.11 -m pytest` -- see the Python-versions table
+above; that interpreter exists but has none of the dependencies.

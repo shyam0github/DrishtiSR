@@ -90,7 +90,14 @@ def add_standard_args(parser) -> None:
         "--set",
         dest="overrides",
         nargs="*",
+        # action="extend" so REPEATED --set flags accumulate. With plain "store"
+        # (argparse's default) a second --set silently replaces the first, so
+        #     --set a.b=1 --set c.d=2
+        # would apply only c.d=2 and drop a.b=1 with no warning -- the caller
+        # sees a successful run configured differently from what they typed.
+        action="extend",
         default=None,
         metavar="KEY=VALUE",
-        help="OmegaConf dotlist overrides, e.g. --set train.epochs=2",
+        help="OmegaConf dotlist overrides, e.g. --set train.epochs=2. May be "
+        "given more than once; all values are applied, later ones winning.",
     )
