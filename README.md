@@ -123,6 +123,31 @@ B04/B03/B02/B08, CPU, 6 threads):
 Bicubic is the bar. A model that does not beat it convincingly has not earned its
 place in the submission.
 
+**Benchmarked against `opensr-test` too, so the floor is not only our own
+arithmetic.** ESA OpenSR's suite (Aybar et al., IEEE JSTARS 2024) is an
+independent implementation that asks whether the detail a super-resolver adds is
+actually present in the reference. Full validation split, 1,199 patches scored,
+0 rejected:
+
+| method | reflectance ↓ | spectral° ↓ | spatial ↓ | synthesis ↑ | halluc. ↓ | omission ↓ | improv. ↑ |
+|---|---|---|---|---|---|---|---|
+| bicubic | 0.0022 | 0.515 | 0.006 | 0.0026 | **0.0808** | 0.8620 | 0.0572 |
+| nearest | 0.0022 | 0.515 | 0.004 | 0.0042 | 0.1692 | **0.7408** | **0.0900** |
+
+**Pixel replication scores better than bicubic on improvement and omission, and
+worse only on hallucination** — its block edges partly coincide with real HR
+boundaries and are counted as recovered detail. LPIPS above ranks the two the
+same way, for the same reason. Two independent metric suites agreeing that
+sharpness and correctness are different axes is the measured case for the
+uncertainty head, and it means `im_metric` must never be read without
+`ha_metric` next to it.
+
+Getting there required guarding two upstream defects, both pinned by test:
+feeding the library digital numbers instead of reflectance does **not** raise (it
+inflates `reflectance` and `synthesis` by 10,000× while the other five are
+bit-identical), and its README's own `Metrics(config=...)` example silently
+discards the configuration and runs defaults.
+
 **The LR is a real second sensor, not a downsample of the HR — checked, because
 the numbers looked wrong.** `verify_data_root.py` reported LR and HR reflectance
 extrema agreeing to four decimals on all four bands; across all 3,000 manifest
