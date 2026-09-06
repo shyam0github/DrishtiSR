@@ -48,6 +48,8 @@ src/export/    ONNX export, INT8 quantisation, CPU benchmarking.
 src/utils/     paths.py, seed.py, logging.py, config.py.
 scripts/       Entry points. Each takes --config and --smoke.
 notebooks/     Kaggle notebooks. Import from src/ only — no logic in cells.
+notebooks/templates/  Sources for generated notebooks. Never edit a generated one.
+docs/          Operational guides, e.g. kaggle_workflow.md.
 tests/         pytest. Runs on CPU, no data required.
 reports/       Write-ups and submission material.
 outputs/       Gitignored: figures/, metrics/, checkpoints/, cache/, run.log.
@@ -84,7 +86,18 @@ python scripts/qa_alignment.py --config configs/base.yaml
 python scripts/run_baseline.py --config configs/base.yaml
 ```
 
-Tests, from the repository root (306 tests, CPU-only, no data required):
+Kaggle runs are driven from the terminal — see
+[docs/kaggle_workflow.md](docs/kaggle_workflow.md):
+
+```bash
+python scripts/kaggle_run.py jobs                      # what is defined
+python scripts/kaggle_run.py push   --job train        # generate, push, start
+python scripts/kaggle_run.py status --job train --watch
+python scripts/kaggle_run.py logs   --job train        # tail-first
+python scripts/kaggle_run.py fetch  --job train        # outputs/kaggle/<job>/<ts>/
+```
+
+Tests, from the repository root (453 tests, CPU-only, no data required):
 
 ```bash
 python -m pytest          # inside the activated .venv
@@ -109,6 +122,15 @@ B04/B03/B02/B08, CPU, 6 threads):
 
 Bicubic is the bar. A model that does not beat it convincingly has not earned its
 place in the submission.
+
+**Kaggle jobs run headless.** `scripts/kaggle_run.py` generates a notebook pinned
+to a git SHA, pushes it, watches it, and pulls the outputs — no browser. Two
+guards are non-negotiable: a push is refused from a dirty or unpushed working
+tree (Kaggle clones from GitHub, so uncommitted work would silently not be in the
+run), and every GPU job runs the data-root check before the expensive work and
+aborts if the mount is unreadable. GPU jobs pin a **T4**, never a P100: the
+default image's cu128 PyTorch has no Pascal `sm_60` kernels, so a P100 session
+reports `cuda.is_available() == True` and then dies on the first CUDA op.
 
 **Next:** SR backbone + heteroscedastic uncertainty head under the 1M-parameter
 budget, then ONNX export and INT8 CPU benchmarking.

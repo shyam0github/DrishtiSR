@@ -150,6 +150,9 @@ src/export/    ONNX export, INT8 quantisation, CPU benchmarking.
 src/utils/     paths.py, seed.py, logging.py.
 scripts/       Entry points. Each takes --config and --smoke.
 notebooks/     Kaggle notebooks. Import from src/ only.
+notebooks/templates/  Sources for GENERATED notebooks. Edit these, never a
+               generated .ipynb -- those are build artefacts under outputs/.
+docs/          Operational guides, e.g. kaggle_workflow.md.
 tests/         pytest. Runs on CPU, no data required.
 reports/       Write-ups and submission material.
 outputs/       Gitignored: figures/, metrics/, checkpoints/, run.log.

@@ -1,0 +1,114 @@
+# Kaggle job definitions, read by scripts/kaggle_run.py.
+#
+# One entry per job. A job is "a notebook that clones this repo at a commit and
+# runs one entry point", so everything that varies between them lives here and
+# nothing varies in the template. Adding a job is an edit to this file; it needs
+# no new code.
+#
+# The runner's own settings -- poll intervals, timeouts, where generated
+# notebooks are written -- live in the `kaggle_run` block of configs/base.yaml,
+# because those are defaults, not per-job facts.
+#
+#     python scripts/kaggle_run.py jobs                 # what is defined here
+#     python scripts/kaggle_run.py push   --job verify
+#     python scripts/kaggle_run.py status --job verify --watch
+#     python scripts/kaggle_run.py logs   --job verify
+#     python scripts/kaggle_run.py fetch  --job verify
+
+# Applied to every job, then overridden by the job's own keys. `dataset_sources`
+# and `pip_packages` are REPLACED by a job that sets them, not merged -- a job
+# that needs a different mount should state its full list.
+defaults:
+  # Notebook template, relative to the repository root. There is one, and jobs
+  # are expected to share it: divergent templates are how "no logic in the
+  # notebook" quietly stops being true.
+  template: notebooks/templates/kaggle_job.py
+
+  # Where the repo is cloned inside the session. MUST be under /kaggle/working:
+  # that directory is what Kaggle saves as kernel output, so anything written
+  # under outputs/ there survives the session and `fetch` can retrieve it.
+  # /kaggle/temp is faster but is discarded when the session ends.
+  workdir: /kaggle/working/DrishtiSR
+
+  # Kaggle Datasets to mount, as bare slugs. The owner prefix is added from your
+  # kaggle.json, so this file carries no username and works for anyone who
+  # clones the repo. Fully-qualified "owner/slug" is accepted too, for someone
+  # else's public dataset.
+  #
+  # MUST contain the cache dataset for any job that reads imagery: it mounts at
+  # /kaggle/input/<slug>, which is what paths.kaggle_dataset_dir points at.
+  dataset_sources:
+    - drishtisr-sen2naipv2-cache
+
+  # Only what the Kaggle image lacks. Deliberately NOT requirements.txt: that
+  # file pins numpy/pandas/scipy/pillow, and installing those pins on Kaggle
+  # downgrades packages the preinstalled PyTorch was built against -- minutes of
+  # session time, and an image where CUDA may no longer import.
+  pip_packages:
+    - omegaconf==2.3.0
+
+  # Kaggle needs internet to clone from GitHub and to pip install. A job with
+  # this false cannot bootstrap at all; it is here to be explicit, not to tune.
+  enable_internet: true
+
+  # Run scripts/verify_data_root.py before the job and abort if it fails.
+  # True everywhere except the job whose entry point IS that script.
+  guard_data_root: true
+  guard_script: scripts/verify_data_root.py
+  guard_args: []
+
+  # Inventoried and printed at the end of the run, and what `fetch` expects to
+  # find. Relative to `workdir`.
+  output_dirs:
+    - outputs
+
+  # Private by default: a kernel is a public artefact the moment it is not.
+  is_private: true
+
+
+jobs:
+
+  # ---------------------------------------------------------------- verify ---
+  verify:
+    title: DrishtiSR verify data root
+    description: >
+      Prove a fresh Kaggle session can read the mounted SEN2NAIPv2 cache: resolve
+      the paths, load the manifest and splits, open real samples and print their
+      shapes, dtypes and per-band reflectance ranges. Run this after every
+      dataset re-upload, before anything that costs GPU time.
+    enable_gpu: false
+    entry: scripts/verify_data_root.py
+    entry_args: ["--config", "configs/base.yaml", "--samples", "5"]
+    # The entry point IS the guard. Running it twice would only double the log.
+    guard_data_root: false
+    expected_runtime_min: 5
+
+  # -------------------------------------------------------------- baseline ---
+  baseline:
+    title: DrishtiSR baseline evaluation
+    description: >
+      Evaluate the non-learned super-resolution baselines over the validation
+      split and write CSV, JSON, a markdown table and the qualitative SAM panel.
+      CPU-only on purpose: these are interpolation baselines, a GPU would buy
+      nothing, and GPU-hours are the scarce resource.
+    enable_gpu: false
+    entry: scripts/run_baseline.py
+    entry_args: ["--config", "configs/base.yaml", "--baseline", "all"]
+    expected_runtime_min: 45
+
+  # ----------------------------------------------------------------- train ---
+  train:
+    title: DrishtiSR train SR model
+    description: >
+      Train the super-resolution model with the heteroscedastic uncertainty
+      head. The only job here that spends the weekly 30-hour GPU budget, and the
+      reason the data guard exists.
+    enable_gpu: true
+    # T4, NOT P100 -- see the accelerator note in scripts/kaggle_run.py and in
+    # the kaggle_run block of configs/base.yaml. A P100 session imports torch
+    # fine and reports torch.cuda.is_available() == True, then dies on the first
+    # CUDA op.
+    accelerator: NvidiaTeslaT4
+    entry: scripts/train.py
+    entry_args: ["--config", "configs/base.yaml"]
+    expected_runtime_min: 480
