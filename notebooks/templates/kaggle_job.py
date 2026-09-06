@@ -59,6 +59,11 @@ os.chdir(WORKDIR)
 sys.path.insert(0, WORKDIR)
 print(f"Running commit {head}")
 print(f"Working directory {os.getcwd()}")
+# Recorded every run, because the Kaggle image's Python version has moved before
+# and the local venv is 3.11. An assumption about it belongs in a log, not in a
+# comment somebody wrote once.
+print(f"Interpreter {sys.executable}")
+print(f"Python {sys.version}")
 
 # %%
 # 2. Dependencies, and the four functions this notebook is allowed to call.

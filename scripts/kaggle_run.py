@@ -924,9 +924,15 @@ def translate_kaggle_failure(completed: subprocess.CompletedProcess, what: str) 
             "complete verification.\n"
             "  - It can also mean the kernel belongs to someone else."
         )
-    elif "404" in lowered or "not found" in lowered:
+    elif (
+        "404" in lowered or "not found" in lowered or "cannot access kernel" in lowered
+    ):
         explanation = (
-            "Kaggle could not find that kernel (404).\n"
+            "Kaggle could not find that kernel, or would not let you see it.\n"
+            "  - MEASURED: a kernel that has never been pushed answers "
+            "\"Cannot access kernel ... (Permission 'kernels.get' was denied)\", "
+            "not a 404. The wording says permission; the cause is almost always "
+            "that it does not exist yet.\n"
             "  - Most likely it has never been pushed. Run "
             "`python scripts/kaggle_run.py push --job <name>` first.\n"
             "  - `logs` and `fetch` also 404 while a kernel exists but has not "
@@ -979,6 +985,34 @@ def translate_kaggle_failure(completed: subprocess.CompletedProcess, what: str) 
     )
 
 
+def looks_absent(output: str) -> bool:
+    """True when Kaggle's failure means "no such kernel" rather than a real error.
+
+    MEASURED: asking for a kernel that has never been pushed does **not** return
+    a 404. It returns
+
+        Cannot access kernel 'owner/slug' (Permission 'kernels.get' was denied).
+
+    which is the same message a genuinely private kernel belonging to someone
+    else produces. Matching only on "404" therefore made ``jobs`` fail outright
+    as soon as one configured job had not been pushed yet -- which is its normal
+    state, and precisely the case it exists to report.
+
+    Args:
+        output: Combined stdout and stderr from the failed call.
+
+    Returns:
+        True when the kernel appears not to exist or not to be reachable. The
+        caller decides what that means; only ``missing_ok`` callers consult it,
+        so a real permissions problem still surfaces everywhere else.
+    """
+    lowered = output.lower()
+    return any(
+        token in lowered
+        for token in ("404", "not found", "cannot access kernel", "was denied")
+    )
+
+
 def kernel_state(
     cfg: Any, identifier: str, logger: Any, missing_ok: bool = False
 ) -> Optional[str]:
@@ -1010,8 +1044,7 @@ def kernel_state(
     )
     output = f"{completed.stdout or ''}\n{completed.stderr or ''}".strip()
     if completed.returncode != 0:
-        lowered = output.lower()
-        if missing_ok and ("404" in lowered or "not found" in lowered):
+        if missing_ok and looks_absent(output):
             return None
         raise RunError(translate_kaggle_failure(completed, f"the status check for {identifier}"))
 
@@ -1601,7 +1634,9 @@ def cmd_jobs(args, cfg, logger) -> int:
         identifier = kernel_id(cfg, username, name)
         state = kernel_state(cfg, identifier, logger, missing_ok=True)
         if state is None:
-            print(f"  {name:<12} never pushed          {identifier}")
+            # Deliberately hedged: Kaggle gives the same "permission denied"
+            # answer for a kernel that does not exist and one you cannot see.
+            print(f"  {name:<12} not pushed / no access  {identifier}")
         else:
             marker = OK.strip() if state == STATE_SUCCESS else (
                 BAD.strip() if state in STATE_FAILURES else "  ..  "

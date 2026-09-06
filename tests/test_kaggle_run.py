@@ -613,3 +613,41 @@ def _silent_logger():
     logger.addHandler(logging.NullHandler())
     logger.propagate = False
     return logger
+
+
+# -- "no such kernel" ------------------------------------------------------
+#
+# MEASURED: Kaggle answers a status query for a kernel that has never been
+# pushed with a PERMISSION error, not a 404:
+#     Cannot access kernel 'owner/slug' (Permission 'kernels.get' was denied).
+# Matching only "404" made `jobs` fail outright whenever a configured job had
+# not been pushed yet -- its normal state, and the case it exists to report.
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "404 - Not found",
+        "Cannot access kernel 'me/x' (Permission 'kernels.get' was denied).",
+        "Kernel not found",
+    ],
+)
+def test_absent_kernels_are_recognised_however_kaggle_words_it(output):
+    assert kr.looks_absent(output)
+
+
+@pytest.mark.parametrize(
+    "output",
+    ["500 Internal Server Error", "Max retries exceeded with url", "invalid dataset source"],
+)
+def test_real_failures_are_not_mistaken_for_an_absent_kernel(output):
+    """A server error must never be reported as 'not pushed yet'."""
+    assert not kr.looks_absent(output)
+
+
+def test_the_permission_wording_is_explained_not_taken_at_face_value():
+    completed = subprocess.CompletedProcess(
+        ["kaggle"], 1, stdout="", stderr="Cannot access kernel 'me/x' (Permission 'kernels.get' was denied)."
+    )
+    message = kr.translate_kaggle_failure(completed, "the status check")
+    assert "never been pushed" in message

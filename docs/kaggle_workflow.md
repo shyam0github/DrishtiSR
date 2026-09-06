@@ -145,6 +145,48 @@ was rejected. It is nearly always a dataset that is not attached: fix
 
 ---
 
+## Three things measured on the live API, not assumed
+
+These cost four CPU runs to find on 2026-09-06. They are recorded here because
+each one had a plausible wrong answer already written down somewhere in this
+repo.
+
+**1. The dataset mounts under the owner.** A dataset attached through
+`kernel-metadata.json`'s `dataset_sources` appears at
+
+```
+/kaggle/input/datasets/<owner>/<slug>
+```
+
+**with** the owner segment — not at `/kaggle/input/<slug>`, which is what
+`configs/base.yaml` and a docstring in `src/utils/paths.py` both asserted. Under
+the old assumption no Kaggle run could ever see its data. Both layouts are now
+tried, in the order given by `paths.kaggle_mount_patterns`, with the owner as a
+glob so no username enters version control.
+
+**2. Kaggle names the kernel from the title, not the id.** Pushing metadata with
+`id: shyamdwivedi0/drishtisr-verify` and `title: DrishtiSR verify data root`
+created the kernel at `drishtisr-verify-data-root`. The push reported success;
+`status`, `logs` and `fetch` then all failed with a permission error that reads
+as though the kernel were private. A run that works and cannot be reached.
+
+Job titles are therefore required to slugify to the kernel slug, checked before
+any push. That is why titles in `configs/kaggle_jobs.yaml` are terse — the
+readable text lives in `description`, which the generated notebook prints in its
+header.
+
+**3. "Never pushed" is reported as a permission error.** Asking about a kernel
+that does not exist returns
+
+```
+Cannot access kernel 'owner/slug' (Permission 'kernels.get' was denied).
+```
+
+not a 404. The wording says permission; the cause is almost always that it has
+not been pushed yet.
+
+---
+
 ## T4, never P100
 
 GPU jobs pin `accelerator: NvidiaTeslaT4`, and the tests enforce it.
@@ -236,6 +278,21 @@ The usual ones:
 | Run fails at the clone step | The commit is not on GitHub, or the repo is private. |
 | `DATA GUARD FAILED` | The cache dataset is not attached, is attached under a different name, or is empty. |
 | Run "succeeds" in seconds with no outputs | Almost certainly the guard was off and the data root was empty. Turn `guard_data_root` on. |
+| `Cannot access kernel ... permission denied` | Usually means the kernel has never been pushed — not that it is private. |
+
+## Known gap: the manifest and splits are not staged
+
+`verify` passes and the 3,002 cached samples are readable, but the run log shows
+`outputs/manifest_sen2naipv2.csv` and `outputs/splits_sen2naipv2.csv` are *not*
+in the working directory — they sit in the mounted dataset instead. Nothing
+copies them across yet.
+
+That is harmless for `verify`, which only reports it. It is **not** harmless for
+`baseline` or `train`: without the splits file the loader recomputes a split
+in-process. That is reproducible, but it is not necessarily the split the
+existing baseline numbers were measured on, so results would not be comparable.
+
+Stage those two files into `outputs/` before running either job.
 
 Related tooling: [`scripts/kaggle_upload.py`](../scripts/kaggle_upload.py)
 publishes the SEN2NAIPv2 sample cache as the Kaggle Dataset every job mounts.

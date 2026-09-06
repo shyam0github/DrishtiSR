@@ -28,7 +28,7 @@ them, say so instead of working around them.
 | where | version | notes |
 |---|---|---|
 | **local project venv** `D:\SIH\DrishtiSR\.venv` | **3.11.9** | The only working local environment. |
-| Kaggle notebooks | **3.11** | Matches the venv at `MAJOR.MINOR`. |
+| Kaggle notebooks | **3.12** | MEASURED 2026-09-06 from a run log: the image's packages live under `/usr/local/lib/python3.12/dist-packages`, and jobs execute as `/usr/bin/python3`. This file previously said 3.11. Generated notebooks now print `sys.version` in their first cell so the value is recorded per run rather than assumed. |
 | local system `py -3.11` | 3.11.9 | **Bare.** No torch, omegaconf, pytest, or kaggle. |
 | local `py -3.14` | 3.14.3 | Has torch but **not** omegaconf. Not a project env. |
 
@@ -60,9 +60,12 @@ The same rule applies inside the code: subprocess calls to Python tooling use
 on PATH here, and `python -m kaggle` through `sys.executable` is what makes the
 tool work regardless.
 
-The version gap that actually matters is small (both sides are 3.11), so
-language-level incompatibility is not the risk. **The risk is running local code
-with the wrong local interpreter** and concluding the code is broken.
+The version gap is one minor release (local 3.11, Kaggle 3.12), so
+language-level incompatibility is a small risk rather than none: code that runs
+locally will run there, but 3.12 removals and deprecations can bite in the other
+direction, and a wheel pinned in `requirements.txt` may not have a 3.12 build.
+**The larger risk remains running local code with the wrong local interpreter**
+and concluding the code is broken.
 
 ### Model budget
 
