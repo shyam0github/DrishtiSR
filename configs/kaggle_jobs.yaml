@@ -70,7 +70,11 @@ jobs:
 
   # ---------------------------------------------------------------- verify ---
   verify:
-    title: DrishtiSR verify data root
+    # Kaggle derives the kernel URL from the TITLE, so this must slugify to
+    # exactly 'drishtisr-verify' -- see validate_job() in scripts/kaggle_run.py.
+    # The readable version of this job lives in 'description' below, which the
+    # generated notebook prints in its header.
+    title: DrishtiSR verify
     description: >
       Prove a fresh Kaggle session can read the mounted SEN2NAIPv2 cache: resolve
       the paths, load the manifest and splits, open real samples and print their
@@ -85,7 +89,7 @@ jobs:
 
   # -------------------------------------------------------------- baseline ---
   baseline:
-    title: DrishtiSR baseline evaluation
+    title: DrishtiSR baseline
     description: >
       Evaluate the non-learned super-resolution baselines over the validation
       split and write CSV, JSON, a markdown table and the qualitative SAM panel.
@@ -98,7 +102,7 @@ jobs:
 
   # ----------------------------------------------------------------- train ---
   train:
-    title: DrishtiSR train SR model
+    title: DrishtiSR train
     description: >
       Train the super-resolution model with the heteroscedastic uncertainty
       head. The only job here that spends the weekly 30-hour GPU budget, and the

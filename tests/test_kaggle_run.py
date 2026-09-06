@@ -251,7 +251,97 @@ def test_an_incomplete_job_is_refused_by_name(tmp_path):
     path = tmp_path / "jobs.yaml"
     path.write_text("jobs:\n  half:\n    title: A job\n", encoding="utf-8")
     with pytest.raises(kr.RunError, match="'half'.*is missing"):
-        kr.validate_job("half", OmegaConf.create({"title": "A job"}), path)
+        kr.validate_job("half", OmegaConf.create({"title": "A job"}), path, "half")
+
+
+# -- the naming drift guard ------------------------------------------------
+#
+# MEASURED against the live API on 2026-09-06, which is why these tests exist
+# rather than the assumption they replace. Pushing kernel-metadata.json with
+#     id    = "shyamdwivedi0/drishtisr-verify"
+#     title = "DrishtiSR verify data root"
+# created the kernel at "shyamdwivedi0/drishtisr-verify-data-root". Kaggle
+# slugifies the TITLE and the id loses. The push reported success; every
+# subsequent status/logs/fetch failed with a permission error that reads like the
+# kernel is private. The run was fine and unreachable.
+
+
+def test_every_job_title_slugifies_to_its_kernel_slug(cfg, jobs):
+    """The push path and the read path must name the same kernel.
+
+    This is the kernel-side twin of the dataset drift guard in
+    test_kaggle_upload.py: there, the upload slug and the mount directory must
+    agree; here, the title Kaggle turns into a URL and the id this tool addresses
+    must agree.
+    """
+    for name, job in jobs.items():
+        assert kr.slugify(str(job.title)) == kr.kernel_slug(cfg, name), (
+            f"job {name!r}: title {str(job.title)!r} would create a kernel at "
+            f"{kr.slugify(str(job.title))!r}, but this tool addresses "
+            f"{kr.kernel_slug(cfg, name)!r}"
+        )
+
+
+def test_a_title_that_would_land_elsewhere_is_refused(tmp_path):
+    """The exact configuration that produced the unreachable kernel."""
+    job = OmegaConf.create(
+        {key: "x" for key in kr.REQUIRED_JOB_KEYS} | {"title": "DrishtiSR verify data root"}
+    )
+    with pytest.raises(kr.RunError, match="does not match its kernel slug"):
+        kr.validate_job("verify", job, tmp_path / "jobs.yaml", "drishtisr-verify")
+
+
+@pytest.mark.parametrize(
+    "title, slug",
+    [
+        ("DrishtiSR verify", "drishtisr-verify"),
+        ("DrishtiSR verify data root", "drishtisr-verify-data-root"),
+        ("  Mixed  CASE__and   punctuation!  ", "mixed-case-and-punctuation"),
+    ],
+)
+def test_slugify_matches_kaggles_rule(title, slug):
+    assert kr.slugify(title) == slug
+
+
+# -- state parsing ---------------------------------------------------------
+#
+# Also MEASURED: the live API answers `has status "KernelWorkerStatus.RUNNING"`,
+# not the bare word. Failing to parse that is not a crash -- an unrecognised
+# state is treated as "still running", so --watch polls a finished job until its
+# timeout and never reports the result.
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("complete", "complete"),
+        ("KernelWorkerStatus.RUNNING", "running"),
+        ("KernelWorkerStatus.COMPLETE", "complete"),
+        ("KernelWorkerStatus.ERROR", "error"),
+        ("KernelWorkerStatus.CANCEL_ACKNOWLEDGED", "cancelacknowledged"),
+        ("cancelAcknowledged", "cancelacknowledged"),
+    ],
+)
+def test_enum_and_bare_states_normalise_to_the_same_token(raw, expected):
+    assert kr.normalise_state(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "reply, expected",
+    [
+        ('x/y has status "KernelWorkerStatus.RUNNING"', "running"),
+        ('x/y has status "KernelWorkerStatus.COMPLETE"', "complete"),
+        ('x/y has status "KernelWorkerStatus.CANCEL_ACKNOWLEDGED"', "cancelacknowledged"),
+    ],
+)
+def test_enum_replies_are_recognised_as_real_states(reply, expected):
+    """The regex and the normaliser together must land on a token the runner
+    actually knows, or a finished run is invisible to --watch."""
+    match = kr._STATE_RE.search(reply)
+    assert match is not None
+    state = kr.normalise_state(match.group(1))
+    assert state == expected
+    assert state == kr.STATE_SUCCESS or state in kr.STATE_FAILURES + kr.STATE_RUNNING
 
 
 # -- slugs and ids ---------------------------------------------------------

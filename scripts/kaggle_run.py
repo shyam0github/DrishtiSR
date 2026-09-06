@@ -94,7 +94,14 @@ STATE_SUCCESS = "complete"
 STATE_FAILURES = ("error", "cancelacknowledged", "cancelrequested")
 STATE_RUNNING = ("queued", "running")
 
-_STATE_RE = re.compile(r'status\s+"?([A-Za-z]+)"?', re.IGNORECASE)
+# MEASURED against the live API: the reply is
+#     shyamdwivedi0/drishtisr-verify has status "KernelWorkerStatus.RUNNING"
+# not the bare word the older client returned. So the pattern accepts a dotted,
+# underscored enum name as well as a plain word, and :func:`normalise_state`
+# reduces both to the same token. Getting this wrong is not a crash: an
+# unrecognised state is treated as "still running", so `--watch` would poll a
+# finished job until its timeout and never report the result.
+_STATE_RE = re.compile(r'status\s+"?([A-Za-z_.]+)"?', re.IGNORECASE)
 _TOKEN_RE = re.compile(r"\{\{[A-Z_]+\}\}")
 
 
@@ -167,7 +174,7 @@ def load_jobs(cfg: Any) -> DictConfig:
         {name: OmegaConf.merge(defaults, job) for name, job in raw.jobs.items()}
     )
     for name, job in merged.items():
-        validate_job(name, job, path)
+        validate_job(name, job, path, kernel_slug(cfg, name))
     return merged
 
 
@@ -181,15 +188,33 @@ REQUIRED_JOB_KEYS = (
 )
 
 
-def validate_job(name: str, job: Any, path: Path) -> None:
-    """Check one job definition has everything the template needs.
+def slugify(text: str) -> str:
+    """Reduce text to a Kaggle slug the way Kaggle does.
+
+    Lowercase, every run of non-alphanumeric characters becomes a single hyphen,
+    and hyphens are trimmed from the ends. ``"DrishtiSR verify data root"``
+    becomes ``"drishtisr-verify-data-root"``.
+    """
+    return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")
+
+
+def validate_job(name: str, job: Any, path: Path, expected_slug: str) -> None:
+    """Check one job definition has everything the template needs, and is named
+    consistently.
 
     Runs at load time so a half-written job produces one plain sentence here,
     rather than an OmegaConf attribute error from somewhere inside template
     rendering, or -- worse -- a pushed kernel missing a setting.
 
+    Args:
+        name: The job's key in the jobs file.
+        job: The merged job definition.
+        path: The jobs file, for the error message.
+        expected_slug: The bare kernel slug this job must resolve to.
+
     Raises:
-        RunError: A required key is absent.
+        RunError: A required key is absent, or the title does not slugify to the
+            kernel slug -- see below, this one is not cosmetic.
     """
     missing = [key for key in REQUIRED_JOB_KEYS if key not in job]
     if missing:
@@ -198,6 +223,39 @@ def validate_job(name: str, job: Any, path: Path) -> None:
             "Keys shared by every job belong in the 'defaults:' block at the top "
             "of that file; 'title', 'entry' and 'enable_gpu' are per-job and "
             "deliberately have no default."
+        )
+
+    # THE DRIFT GUARD. MEASURED, not assumed: pushing a kernel whose
+    # kernel-metadata.json says id "shyamdwivedi0/drishtisr-verify" while its
+    # title is "DrishtiSR verify data root" creates the kernel at
+    # "shyamdwivedi0/drishtisr-verify-data-root". Kaggle slugifies the TITLE and
+    # the id loses; the CLI prints a warning about it and pushes anyway.
+    #
+    # The consequence is not cosmetic. The push succeeds, and then `status`,
+    # `logs` and `fetch` -- which all address the id -- fail with a permission
+    # error that reads like the kernel is private. The run itself is fine and
+    # completely unreachable from this tool.
+    #
+    # So the two are required to agree here, before anything is pushed. Which
+    # field Kaggle honours then stops mattering: both name the same kernel.
+    actual = slugify(str(job.title))
+    if actual != expected_slug:
+        raise RunError(
+            f"The job {name!r} in {path} has a title that does not match its "
+            "kernel slug.\n"
+            f"  title:          {str(job.title)!r}\n"
+            f"  slugifies to:   {actual!r}\n"
+            f"  kernel slug:    {expected_slug!r}\n"
+            "\n"
+            "Kaggle derives the kernel's URL from the TITLE, not from the 'id' in "
+            "kernel-metadata.json. If they disagree, the push succeeds and lands "
+            "at the title's slug, while status/logs/fetch look for the id's slug "
+            "and report a permission error -- a run that works and cannot be "
+            "reached.\n"
+            "\n"
+            f"Fix: set this job's title to something that slugifies to "
+            f"{expected_slug!r}, e.g. {expected_slug.replace('-', ' ').title()!r}, "
+            "or change cfg.kaggle_run.slug_prefix."
         )
 
 
@@ -611,6 +669,11 @@ def build_tokens(
 
     return {
         "JOB_NAME": job_name,
+        # Kaggle slugifies the title into the kernel URL, so titles are terse and
+        # this is where a job says what it actually does. Collapsed to one line:
+        # it lands inside a markdown cell built from comment lines.
+        "DESCRIPTION": " ".join(str(job.get("description") or "").split())
+        or "(no description set for this job)",
         "GENERATED_AT": _dt.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z"),
         "GIT_SHA": sha,
         "GIT_SHA_LITERAL": repr(sha),
@@ -962,7 +1025,7 @@ def kernel_state(
             f"{output or '(no output)'}"
         )
 
-    state = match.group(1).lower()
+    state = normalise_state(match.group(1))
     if state in STATE_FAILURES:
         # Kaggle appends the exception text after a failed state. It is the most
         # useful line available without downloading the whole log, so it is
@@ -974,6 +1037,25 @@ def kernel_state(
     return state
 
 
+def normalise_state(raw: str) -> str:
+    """Reduce whatever Kaggle called the state to one comparable token.
+
+    Handles both forms the API has been seen to return: the bare word
+    (``complete``) and the qualified enum name
+    (``KernelWorkerStatus.CANCEL_ACKNOWLEDGED``). The enum's qualifier is
+    dropped, underscores are removed, and the result is lowercased, so
+    ``CANCEL_ACKNOWLEDGED`` and ``cancelAcknowledged`` both become
+    ``cancelacknowledged``.
+
+    Args:
+        raw: The captured text after ``status``.
+
+    Returns:
+        The lowercased, undecorated state token.
+    """
+    return raw.rsplit(".", 1)[-1].replace("_", "").lower()
+
+
 def state_message(output: str) -> str:
     """Extract the failure detail Kaggle appends after an errored state, if any.
 
@@ -981,7 +1063,7 @@ def state_message(output: str) -> str:
     exception text. That text is the single most useful line available without
     downloading the log, so it is surfaced rather than discarded.
     """
-    marker = re.search(r'status\s+"?[A-Za-z]+"?\s*[.:]?\s*(.*)', output, re.DOTALL)
+    marker = re.search(r'status\s+"?[A-Za-z_.]+"?\s*[.:]?\s*(.*)', output, re.DOTALL)
     detail = (marker.group(1).strip() if marker else "").strip()
     return detail
 

@@ -106,7 +106,35 @@ def describe_paths(cfg: Any) -> dict:
             else:
                 print(f"{BAD}Kaggle mount:     {mount}  EXISTS BUT IS EMPTY")
         else:
-            print(f"{INFO}Kaggle mount:     {mount}  (not present -- normal off Kaggle)")
+            on_kaggle = Path("/kaggle").is_dir()
+            marker = BAD if on_kaggle else INFO
+            suffix = (
+                "  NOT PRESENT -- nothing is attached under this name"
+                if on_kaggle
+                else "  (not present -- normal off Kaggle)"
+            )
+            print(f"{marker}Kaggle mount:     {mount}{suffix}")
+            # List what IS mounted. Without this the log says only that the
+            # expected path is missing, which cannot distinguish "no dataset was
+            # attached" from "a dataset was attached under a different name" --
+            # and those have different fixes. MEASURED: a run that reached this
+            # line cost a full session to diagnose because the log did not say
+            # what was actually there.
+            if on_kaggle and mount.parent.is_dir():
+                attached = sorted(child.name for child in mount.parent.iterdir())
+                if attached:
+                    print(f"{INFO}  {mount.parent} actually contains:")
+                    for name in attached:
+                        print(f"{INFO}    - {name}")
+                    print(
+                        f"{INFO}  If one of those is the cache, set "
+                        "paths.kaggle_dataset_dir to that name."
+                    )
+                else:
+                    print(
+                        f"{INFO}  {mount.parent} is EMPTY: this session has no "
+                        "inputs attached at all."
+                    )
 
     result: dict = {"mount": mount, "failure": None, "data_root": None, "cache_dir": None}
 
