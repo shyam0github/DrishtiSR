@@ -637,6 +637,122 @@ opensr_test:
   json_name: "opensr_{method}.json"
   csv_name: "opensr_{method}.csv"
 
+# Degradation audit: is the LR a synthetic downsample of the HR, or a genuine
+# second sensor?
+#
+# WHY THIS BLOCK EXISTS. scripts/verify_data_root.py printed LR and HR per-band
+# reflectance min/max that agreed to four decimal places on every band, with the
+# means differing only in the fourth decimal. Two sensors at 10 m and 2.5 m
+# cannot produce that by coincidence, so it is either a reporting bug or the
+# pair is not what the dataset card claims. scripts/audit_degradation.py settles
+# it by measurement, and this block holds every constant that measurement uses.
+#
+# NOTHING HERE MAY BE TUNED TO PRODUCE A COMFORTABLE ANSWER. The thresholds
+# below are stated in advance of the result on purpose; if a future run lands
+# between them, the honest move is to report the ambiguity, not to move the line.
+degradation_audit:
+  # Pairs sampled without replacement, with cfg.seed, from the cached and
+  # manifest-validated pool -- same selection machinery as cfg.alignment, for
+  # the same reason: SEN2NAIPv2 records are ordered geographically, so the
+  # first N are one grid cell rather than a sample of the archive.
+  num_pairs: 200
+
+  # Candidate degradation kernels, each mapping HR (C, 520, 520) -> (C, 130, 130)
+  # so it can be scored against the stored LR. Implemented in
+  # src.eval.degradation.DEGRADATION_KERNELS; an unknown name raises rather than
+  # being skipped.
+  #
+  # The set spans the two families that behave differently under the test:
+  # AVERAGING kernels (bicubic_antialias, bilinear_antialias, area, box) mix
+  # neighbouring HR pixels and therefore REDUCE variance, while SAMPLING kernels
+  # (bicubic_naive, nearest) take pixels through unchanged and preserve it. Which
+  # family fits is more diagnostic than the winning PSNR alone -- see the
+  # variance-ratio test below.
+  kernels:
+    - bicubic_antialias
+    - bicubic_naive
+    - bilinear_antialias
+    - area
+    - box
+    - nearest
+
+  # Nearest-subsampling has an unknown phase: HR pixel (0,0) may or may not be
+  # the one that became LR pixel (0,0). Scoring a single phase would understate
+  # the kernel's true fit, so all scale**2 = 16 offsets are tried per sample and
+  # the best is reported, along with which offset won. A synthetic nearest
+  # degradation shows the SAME winning offset on essentially every sample; a
+  # coincidental fit scatters across offsets. The consistency is the evidence.
+  nearest_search_all_offsets: true
+
+  # Verdict thresholds on the best kernel's median PSNR, in dB, in the
+  # reflectance domain at cfg.metrics.data_range.
+  #
+  # Above synthetic_psnr_db the LR is a resampling of the HR: the residual is at
+  # the level of uint16 rounding, and the SR task is then to invert a known
+  # analytic operator, which is not the stated problem and would not survive
+  # review.
+  synthetic_psnr_db: 45.0
+  # Below crosssensor_psnr_db the residual is large enough to be two genuinely
+  # different acquisitions. Between the two is UNRESOLVED and is reported as
+  # such.
+  crosssensor_psnr_db: 35.0
+
+  # THRESHOLD-FREE DISCRIMINATORS. Added after the first real run landed at
+  # 45.38 dB -- 0.38 dB on the synthetic side of the line above, while the
+  # variance test said the opposite. A verdict that can be decided by 0.38 dB is
+  # not a verdict, so these two tests were added; NEITHER of them depends on a
+  # dB threshold chosen by us, and both are properties a synthetic degradation
+  # cannot avoid.
+  #
+  # 1. SPREAD. A deterministic operator applied to 200 tiles produces nearly the
+  #    same PSNR on every one of them. MEASURED on the synthetic stub, whose LR
+  #    IS an exact block mean: p95 - p5 = 0.09 dB. Real cross-sensor pairs spread
+  #    over 13.15 dB, because two acquisitions disagree by different amounts over
+  #    different terrain. Above this many dB of spread, no single deterministic
+  #    kernel produced the LR.
+  deterministic_spread_db: 2.0
+  #
+  # 2. THE QUANTISATION CEILING, computed rather than configured, from
+  #    cfg.dataset.reflectance_scale and cfg.metrics.data_range: a synthetic
+  #    degradation computed in float and stored as uint16 can only differ from
+  #    its own kernel by the rounding, which puts it near 90.8 dB at scale
+  #    10000. Anything tens of dB below that ceiling has a residual far larger
+  #    than rounding, i.e. real content the kernel does not explain. The fraction
+  #    of the ceiling required before a fit counts as "the LR IS this kernel's
+  #    output":
+  quantisation_ceiling_fraction: 0.75
+
+  # The floor. Each sample's LR is also scored against the degraded HR of a
+  # DIFFERENT, randomly paired sample. Without this control a PSNR has no scale:
+  # natural imagery over similar terrain scores far above zero, so "41 dB" means
+  # nothing until "unrelated tiles score X dB" is on the same page.
+  control_mismatched_pairs: true
+
+  # Marginal-distribution test, which separates the two hypotheses that both
+  # produce matching min/max:
+  #   H1 the LR was downsampled from the HR -- any averaging kernel must LOWER
+  #      the variance, so std_lr / std_hr < 1 by a visible margin;
+  #   H2 the HR was radiometrically harmonised (histogram-matched) to the LR --
+  #      the marginals then agree BY CONSTRUCTION while the spatial content
+  #      stays genuinely different, and std_lr / std_hr ~= 1.
+  # variance_ratio_tol is how close to 1.0 the median ratio must sit before H2
+  # is reported as the explanation.
+  variance_ratio_tol: 0.02
+  # Quantiles compared per band between LR and HR, as percentages.
+  quantiles: [0, 1, 5, 25, 50, 75, 95, 99, 100]
+
+  # Reported percentiles of every per-sample distribution. A mean alone is what
+  # let this go unnoticed; the spread is the finding.
+  percentiles: [0, 5, 25, 50, 75, 95, 100]
+
+  # Also score bicubic UPSAMPLING of the LR against the HR -- the x4 SR baseline
+  # number (38.47 dB) that this audit exists to either justify or discredit.
+  # Cheap, and printing the two numbers side by side is the entire point.
+  include_upsample_baseline: true
+
+  report_name: degradation_audit.json
+  csv_name: degradation_audit_per_sample.csv
+
 # Smoke mode: every entry-point script must accept --smoke and, when set, merge
 # this block over the config so a full run completes in a couple of minutes on CPU.
 #
@@ -677,6 +793,23 @@ smoke:
     report_name: alignment_report_smoke.json
     grid_figure_name: alignment_grid_smoke.png
     histogram_figure_name: alignment_histograms_smoke.png
+  degradation_audit:
+    # THE POINT OF THE SMOKE RUN, and it is a real self-test rather than a
+    # rehearsal. The synthetic stub builds its LR as an exact block-mean
+    # downsample of its HR (see src/data/synthetic.py), so --smoke feeds the
+    # audit a pair that IS synthetically degraded, by construction and by a
+    # kernel that is in the candidate list. A correct audit must therefore
+    # return verdict SYNTHETIC, name "box" (or "area", which is identical at
+    # integer scale) as the best kernel, and report a PSNR at the numerical
+    # ceiling. Until that passes, the verdict it prints on real data means
+    # nothing.
+    num_pairs: 8
+    # Separate filenames so a smoke check never overwrites the real audit. A
+    # stub report sitting at the real report's path -- reading SYNTHETIC, which
+    # for the stub is the CORRECT answer -- is exactly the kind of thing that
+    # gets found later and believed.
+    report_name: degradation_audit_smoke.json
+    csv_name: degradation_audit_per_sample_smoke.csv
   metrics:
     lpips:
       # --smoke MUST NEVER TOUCH THE NETWORK, and LPIPS downloads pretrained

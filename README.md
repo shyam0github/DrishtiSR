@@ -123,6 +123,34 @@ B04/B03/B02/B08, CPU, 6 threads):
 Bicubic is the bar. A model that does not beat it convincingly has not earned its
 place in the submission.
 
+**The LR is a real second sensor, not a downsample of the HR — checked, because
+the numbers looked wrong.** `verify_data_root.py` reported LR and HR reflectance
+extrema agreeing to four decimals on all four bands; across all 3,000 manifest
+rows the LR and HR maxima are identical in 100% of cases. That is not a
+reporting fault, so `scripts/audit_degradation.py` tested the pairs directly over
+200 samples:
+
+| test | synthetic LR would give | measured |
+|---|---|---|
+| best kernel fit vs stored LR | ≈ 90.8 dB (uint16 rounding ceiling) | **45.38 dB** median, 0/200 exact |
+| per-tile spread, p5–p95 | ~0 dB (a fixed kernel is deterministic) | **13.15 dB** |
+| std(LR) / std(HR) | < 1 (averaging destroys variance) | **1.0004** |
+
+Verdict **CROSS_SENSOR**. The matching extrema come from the HR having been
+radiometrically harmonised onto the LR — LR/HR quantiles agree to ~4 DN
+uniformly, the signature of histogram matching, not of resampling. Provenance
+confirmed against the live TACO catalogue: every record resolves to
+`sen2naipv2-crosssensor.taco`, with `days_between` ∈ {−1, 0, +1}, i.e. two real
+acquisitions within a day of each other. Unrelated tiles floor at 24.83 dB.
+
+Two caveats recorded rather than buried: the catalogue's own `correlation` field
+(median 0.927) does not match the measured LR/HR agreement (0.9966), so it is
+computed on something else and should not be quoted as validation; and because
+the HR radiometry was matched to the LR, part of the spectral-consistency
+objective is satisfied by dataset construction rather than by the model.
+`--smoke` runs the audit against the synthetic stub, whose LR *is* an exact block
+mean, as a standing self-test that the detector can still detect a degradation.
+
 **Kaggle jobs run headless.** `scripts/kaggle_run.py` generates a notebook pinned
 to a git SHA, pushes it, watches it, and pulls the outputs — no browser. Two
 guards are non-negotiable: a push is refused from a dirty or unpushed working
