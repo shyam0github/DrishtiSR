@@ -463,7 +463,7 @@ def test_cache_dir_never_creates_the_read_only_mount(tmp_path):
     "command", ["survey", "stage", "dryrun", "upload", "version"]
 )
 def test_every_subcommand_accepts_config_and_smoke(command):
-    """CLAUDE.md: every entry point takes --config and --smoke."""
+    """AGENTS.md: every entry point takes --config and --smoke."""
     argv = [command, "--config", "configs/base.yaml", "--smoke"]
     if command == "version":
         argv += ["-m", "test message"]

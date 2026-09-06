@@ -6,7 +6,7 @@
 # artefacts under outputs/ -- editing one is editing something that is about to
 # be overwritten. Change behaviour here, or in src/utils/kaggle_session.py.
 #
-# The notebook contains no logic on purpose (see CLAUDE.md). It clones the repo
+# The notebook contains no logic on purpose (see AGENTS.md). It clones the repo
 # at one exact commit, installs what the Kaggle image lacks, and calls four
 # functions from src/. Everything those functions do is version-controlled and
 # testable on the local CPU box.

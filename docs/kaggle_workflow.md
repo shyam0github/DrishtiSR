@@ -12,7 +12,7 @@ D:\SIH\DrishtiSR\.venv\Scripts\python.exe scripts/kaggle_run.py <subcommand>
 ```
 
 (Shortened to `python scripts/kaggle_run.py` below. It is never a bare `python`
-in practice — see the Python-versions table in `CLAUDE.md`.)
+in practice — see the Python-versions table in `AGENTS.md`.)
 
 ---
 
