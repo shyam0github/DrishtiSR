@@ -6,12 +6,13 @@ where that logic lives, so a generated cell reads as one function call and the
 behaviour behind it is version-controlled, reviewable, and testable on CPU
 locally rather than only observable in a Kaggle log.
 
-The four steps, in the order a notebook runs them:
+The five steps, in the order a notebook runs them:
 
 1. :func:`pip_install`       -- add the few packages the Kaggle image lacks.
 2. :func:`guard_data_root`   -- prove the session can see its data, or abort.
 3. :func:`run_entry`         -- run one ``scripts/*.py`` entry point.
 4. :func:`inventory_outputs` -- say what the run actually produced.
+5. :func:`prune_workdir`     -- leave results, not a copy of the source tree.
 
 Every step streams the child process's output line by line as it arrives, rather
 than capturing it and printing at the end. A training run that prints nothing for
@@ -24,6 +25,7 @@ local CPU box, which is how it gets tested without spending a GPU-hour.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +37,7 @@ __all__ = [
     "guard_data_root",
     "run_entry",
     "inventory_outputs",
+    "prune_workdir",
 ]
 
 # Files a run is expected to produce, grouped so the closing inventory says
@@ -222,6 +225,59 @@ def run_entry(
             "`python scripts/kaggle_run.py logs --job <name>`."
         )
     print(f"\n{script} completed successfully.", flush=True)
+
+
+def prune_workdir(keep: Sequence[str], repo_dir: Optional[str] = None) -> None:
+    """Delete everything in the working directory except the output folders.
+
+    Kaggle saves ``/kaggle/working`` as the kernel's output, and the job clones
+    this repository into it -- so without this step every ``fetch`` drags a full
+    copy of the source tree back alongside the checkpoints, and a local ``pytest``
+    then finds two copies of every test module. MEASURED: exactly that happened
+    on the first real run.
+
+    Runs last, after the job has succeeded and the inventory has been printed.
+    Only paths inside ``repo_dir`` are touched, and only its top-level entries;
+    the code is already committed in git, so nothing unique is being deleted --
+    the clone is a disposable copy of a pushed commit.
+
+    Args:
+        keep: Top-level names to preserve, normally the job's ``output_dirs``.
+        repo_dir: The cloned working directory. None means the current one.
+
+    Raises:
+        SessionAborted: A path escaped ``repo_dir``, or a deletion failed. This
+            fails the run rather than leaving output in an unknown state; the
+            job's results are still saved and fetchable either way.
+    """
+    base = (Path(repo_dir) if repo_dir else Path.cwd()).resolve()
+    keep_names = {Path(name).parts[0] for name in keep if str(name).strip()}
+    print(f"\nPruning {base}, keeping: {', '.join(sorted(keep_names)) or '(nothing)'}", flush=True)
+
+    removed = 0
+    for child in sorted(base.iterdir()):
+        if child.name in keep_names:
+            continue
+        resolved = child.resolve()
+        if base not in resolved.parents:
+            raise SessionAborted(
+                f"Refusing to delete {resolved}: it is not inside {base}. "
+                "This is a bug in the generated notebook, not in your job."
+            )
+        try:
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+        except OSError as exc:
+            raise SessionAborted(
+                f"Could not remove {child} while pruning the working directory: "
+                f"{exc}\nThe job itself succeeded and its outputs are saved -- "
+                "fetch them and ignore this failure."
+            ) from exc
+        removed += 1
+
+    print(f"Removed {removed} top-level entries; only outputs remain.", flush=True)
 
 
 def inventory_outputs(directories: Iterable[str], repo_dir: Optional[str] = None) -> None:

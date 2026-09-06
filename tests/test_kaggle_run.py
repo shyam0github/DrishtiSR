@@ -27,7 +27,12 @@ import pytest
 from omegaconf import OmegaConf
 
 from src.utils.config import load_config
-from src.utils.kaggle_session import SessionAborted, guard_data_root, run_entry
+from src.utils.kaggle_session import (
+    SessionAborted,
+    guard_data_root,
+    prune_workdir,
+    run_entry,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
@@ -123,6 +128,46 @@ def test_a_failing_entry_point_aborts_rather_than_returning(tmp_path):
     with pytest.raises(SessionAborted) as excinfo:
         run_entry("job.py", repo_dir=str(tmp_path))
     assert "exited with code" in str(excinfo.value)
+
+
+# -- pruning the working directory -----------------------------------------
+#
+# Kaggle saves all of /kaggle/working as kernel output, and the job clones the
+# repo into it. MEASURED on the first real run: `logs` then downloaded a second
+# copy of this repository into outputs/, and pytest collected both, failing with
+# 12 collection errors that looked like a broken test suite.
+
+
+def test_pruning_keeps_outputs_and_removes_the_source_tree(tmp_path):
+    (tmp_path / "outputs").mkdir()
+    (tmp_path / "outputs" / "metrics.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "model.py").write_text("x = 1", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
+
+    prune_workdir(["outputs"], repo_dir=str(tmp_path))
+
+    assert (tmp_path / "outputs" / "metrics.json").is_file()
+    assert not (tmp_path / "src").exists()
+    assert not (tmp_path / ".git").exists()
+    assert not (tmp_path / "README.md").exists()
+
+
+def test_pruning_an_absent_output_dir_removes_everything_else(tmp_path):
+    """A job that wrote nothing still prunes; the empty inventory is the signal,
+    not a crash here."""
+    (tmp_path / "src").mkdir()
+    prune_workdir(["outputs"], repo_dir=str(tmp_path))
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_pruning_only_keeps_the_top_level_component(tmp_path):
+    (tmp_path / "outputs" / "figures").mkdir(parents=True)
+    (tmp_path / "src").mkdir()
+    prune_workdir(["outputs/figures"], repo_dir=str(tmp_path))
+    assert (tmp_path / "outputs" / "figures").is_dir()
+    assert not (tmp_path / "src").exists()
 
 
 # -- notebook generation ---------------------------------------------------

@@ -66,6 +66,7 @@ from src.utils.kaggle_session import (
     guard_data_root,
     inventory_outputs,
     pip_install,
+    prune_workdir,
     run_entry,
 )
 
@@ -89,3 +90,10 @@ run_entry({{ENTRY_SCRIPT_LITERAL}}, args={{ENTRY_ARGS}})
 # 5. What was produced. Everything under /kaggle/working is retrievable with
 #    `python scripts/kaggle_run.py fetch --job {{JOB_NAME}}`.
 inventory_outputs({{OUTPUT_DIRS}})
+
+# %%
+# 6. Drop the cloned source tree, so the saved kernel output is results only.
+#    Kaggle keeps everything under /kaggle/working; without this, every fetch
+#    also downloads a full copy of the repo. The code is in git at the commit
+#    printed above -- nothing unique is deleted here.
+prune_workdir({{OUTPUT_DIRS}})

@@ -77,6 +77,43 @@ def parse_args(argv=None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def shallow_tree(root: Path, max_depth: int = 3, max_entries: int = 40) -> List[str]:
+    """List a few levels of a directory, for diagnosing a missing mount.
+
+    One level is not enough. MEASURED on Kaggle: when the expected mount was
+    absent, ``/kaggle/input`` contained a single entry named ``datasets`` -- which
+    says the attachment exists but is nested somewhere else, and nothing about
+    where. Three levels is enough to reach ``<root>/datasets/<owner>/<slug>``
+    while staying short enough to read in a log.
+
+    Args:
+        root: Directory to list.
+        max_depth: How many levels below ``root`` to descend.
+        max_entries: Stop after this many lines, so a mount holding thousands of
+            files cannot bury the rest of the report.
+
+    Returns:
+        Indented ``"- name"`` lines, deepest paths last. Directories are marked
+        with a trailing ``/``. Empty when ``root`` has no children.
+    """
+    lines: List[str] = []
+
+    def walk(directory: Path, depth: int) -> None:
+        if depth > max_depth or len(lines) >= max_entries:
+            return
+        for child in sorted(directory.iterdir(), key=lambda item: item.name):
+            if len(lines) >= max_entries:
+                lines.append(f"{'  ' * (depth - 1)}... (listing truncated)")
+                return
+            is_dir = child.is_dir()
+            lines.append(f"{'  ' * (depth - 1)}- {child.name}{'/' if is_dir else ''}")
+            if is_dir:
+                walk(child, depth + 1)
+
+    walk(root, 1)
+    return lines
+
+
 def describe_paths(cfg: Any) -> dict:
     """Print every path the resolver considered, and what it chose.
 
@@ -121,15 +158,16 @@ def describe_paths(cfg: Any) -> dict:
             # line cost a full session to diagnose because the log did not say
             # what was actually there.
             if on_kaggle and mount.parent.is_dir():
-                attached = sorted(child.name for child in mount.parent.iterdir())
-                if attached:
+                listing = shallow_tree(mount.parent)
+                if listing:
                     print(f"{INFO}  {mount.parent} actually contains:")
-                    for name in attached:
-                        print(f"{INFO}    - {name}")
+                    for line in listing:
+                        print(f"{INFO}    {line}")
                     print(
-                        f"{INFO}  If one of those is the cache, set "
-                        "paths.kaggle_dataset_dir to that name."
+                        f"{INFO}  If the cache is in there under another path, "
+                        "point paths.kaggle_mount_root and"
                     )
+                    print(f"{INFO}  paths.kaggle_dataset_dir at it.")
                 else:
                     print(
                         f"{INFO}  {mount.parent} is EMPTY: this session has no "
