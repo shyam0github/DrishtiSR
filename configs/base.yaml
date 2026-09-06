@@ -43,6 +43,23 @@ paths:
   # if they drift, the upload lands at one path and the resolver looks at
   # another, and the only symptom is an empty dataset.
   kaggle_dataset_dir: drishtisr-sen2naipv2-cache
+
+  # WHERE THE MOUNT ACTUALLY APPEARS. There is more than one layout, and this
+  # project had the wrong one.
+  #
+  # MEASURED on Kaggle 2026-09-06, by listing /kaggle/input from inside a run:
+  # a dataset attached through kernel-metadata.json's dataset_sources appears at
+  #     /kaggle/input/datasets/<owner>/<slug>
+  # WITH the owner segment -- not at /kaggle/input/<slug>, which is the layout
+  # this file and src/utils/paths.py both asserted. Every run therefore resolved
+  # no data, and on a GPU job that is an hour of the weekly budget.
+  #
+  # Both layouts are tried, in this order, by kaggle_mount_candidates(). The
+  # owner is a glob rather than a username so nothing here has to change for a
+  # different Kaggle account, and no username enters version control.
+  kaggle_mount_patterns:
+    - "{root}/datasets/*/{name}"
+    - "{root}/{name}"
   # Local Windows mirror of the same tree. Forward slashes are intentional:
   # pathlib handles them correctly on Windows and they survive YAML unescaped.
   local_data_root: D:/SIH/DrishtiSR/data

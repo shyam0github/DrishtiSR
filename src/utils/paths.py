@@ -8,6 +8,7 @@ is derived from one of the two functions here; no module may hardcode a root.
 
 from __future__ import annotations
 
+import glob as _glob
 from pathlib import Path
 from typing import Any, Optional
 
@@ -17,6 +18,7 @@ __all__ = [
     "resolve_cache_dir",
     "resolve_output_path",
     "kaggle_mount_path",
+    "kaggle_mount_candidates",
 ]
 
 # Order matters: Kaggle wins, so a notebook never silently trains off a stale
@@ -43,10 +45,12 @@ def resolve_data_root(cfg: Any) -> Path:
 
     1. ``cfg.paths.data_root`` -- an explicit override. If set (non-null) it wins
        unconditionally and must exist.
-    2. **The mounted Kaggle Dataset**,
-       ``{cfg.paths.kaggle_mount_root}/{cfg.paths.kaggle_dataset_dir}`` -- the
-       cache published by ``scripts/kaggle_upload.py``. Skipped when either key
-       is absent, and **rejected when the directory exists but is empty**.
+    2. **The mounted Kaggle Dataset**, at any of the layouts
+       ``paths.kaggle_mount_patterns`` describes -- the cache published by
+       ``scripts/kaggle_upload.py``. MEASURED: the live layout is
+       ``/kaggle/input/datasets/<owner>/<slug>``, not the ``/kaggle/input/<slug>``
+       this project originally assumed, so both are tried. Skipped when the mount
+       keys are absent, and **rejected when a directory exists but is empty**.
     3. ``cfg.paths.kaggle_data_root`` -- normally ``/kaggle/input``.
     4. ``cfg.paths.local_data_root`` -- the local Windows mirror.
 
@@ -99,8 +103,7 @@ def resolve_data_root(cfg: Any) -> Path:
         return candidate.resolve()
 
     candidates: list = []
-    mount = kaggle_mount_path(cfg)
-    if mount is not None:
+    for mount in kaggle_mount_candidates(cfg):
         candidates.append(("paths.kaggle_mount_root/kaggle_dataset_dir", mount))
     candidates += [
         (f"paths.{key}", _as_path(_get(paths, key, required=True), f"paths.{key}"))
@@ -142,25 +145,33 @@ def resolve_data_root(cfg: Any) -> Path:
     )
 
 
-def kaggle_mount_path(cfg: Any) -> Optional[Path]:
-    """The Kaggle Dataset mount path composed from config, or None.
+def kaggle_mount_candidates(cfg: Any) -> list:
+    """Every path a Kaggle Dataset might be mounted at, in preference order.
 
-    The path a Kaggle Dataset appears at is
-    ``{paths.kaggle_mount_root}/{paths.kaggle_dataset_dir}``. Note that the mount
-    uses the dataset **name only** -- there is no owner prefix -- even though the
-    API slug that created it is ``"<username>/<name>"``.
+    There is more than one layout, which is the whole reason this function
+    replaced a single composed path.
 
-    This is the one place that composition happens. Nothing hardcodes
-    ``/kaggle/input`` or the dataset name, so renaming the dataset is a config
-    edit rather than a code search.
+    MEASURED on Kaggle, 2026-09-06: a dataset attached to a notebook through
+    ``kernel-metadata.json``'s ``dataset_sources`` appears at
+    ``/kaggle/input/datasets/<owner>/<slug>`` -- **with** the owner segment. The
+    older, widely documented layout is ``/kaggle/input/<slug>``, with no owner.
+    This project assumed the second, and its own source comment asserted that
+    "the mount uses the dataset name only -- there is no owner prefix". That was
+    wrong, and the cost of being wrong is a session that finds no data.
+
+    So both layouts are tried. The patterns live in
+    ``paths.kaggle_mount_patterns`` and may contain ``{root}``, ``{name}`` and
+    shell globs; the owner segment is a ``*`` so that no Kaggle username is
+    written into version control.
 
     Args:
         cfg: The loaded config, or any mapping with a ``paths`` section.
 
     Returns:
-        The composed path, or ``None`` when either key is absent or null -- which
-        is the correct state for a config that predates the upload tooling, and
-        makes the mount candidate simply not apply.
+        Candidate paths, most-preferred first. Glob patterns contribute only
+        paths that currently exist; literal patterns are always included so a
+        failure message can name what was looked for. Empty when
+        ``kaggle_mount_root`` or ``kaggle_dataset_dir`` is absent.
 
     Raises:
         KeyError: ``cfg`` has no ``paths`` section.
@@ -170,10 +181,46 @@ def kaggle_mount_path(cfg: Any) -> Optional[Path]:
     root = _get(paths, "kaggle_mount_root", required=False)
     name = _get(paths, "kaggle_dataset_dir", required=False)
     if root is None or name is None:
-        return None
-    return _as_path(root, "paths.kaggle_mount_root") / _as_path(
-        name, "paths.kaggle_dataset_dir"
-    )
+        return []
+
+    root_text = str(_as_path(root, "paths.kaggle_mount_root")).replace("\\", "/").rstrip("/")
+    name_text = str(_as_path(name, "paths.kaggle_dataset_dir"))
+
+    patterns = _get(paths, "kaggle_mount_patterns", required=False) or ["{root}/{name}"]
+    candidates: list = []
+    for pattern in patterns:
+        text = str(pattern).format(root=root_text, name=name_text)
+        if any(character in text for character in "*?["):
+            candidates.extend(Path(match) for match in sorted(_glob.glob(text)))
+        else:
+            candidates.append(Path(text))
+    return candidates
+
+
+def kaggle_mount_path(cfg: Any) -> Optional[Path]:
+    """The Kaggle Dataset mount, or the path it was expected at.
+
+    Prefers a candidate that exists and is non-empty; failing that, returns the
+    first literal candidate so callers can say what they looked for. See
+    :func:`kaggle_mount_candidates` for why there is more than one candidate.
+
+    Args:
+        cfg: The loaded config, or any mapping with a ``paths`` section.
+
+    Returns:
+        The mounted path when one is usable, else the first expected path, else
+        ``None`` when the config names no mount at all -- the correct state for a
+        config that predates the upload tooling.
+
+    Raises:
+        KeyError: ``cfg`` has no ``paths`` section.
+        ValueError: A key is present but blank.
+    """
+    candidates = kaggle_mount_candidates(cfg)
+    for candidate in candidates:
+        if candidate.is_dir() and not _is_empty_dir(candidate):
+            return candidate
+    return candidates[0] if candidates else None
 
 
 def _is_empty_dir(path: Path) -> bool:
@@ -217,9 +264,8 @@ def resolve_cache_dir(cfg: Any) -> Path:
 
     Resolution order:
 
-    1. **The mounted Kaggle Dataset**, when
-       ``{paths.kaggle_mount_root}/{paths.kaggle_dataset_dir}`` exists and is
-       non-empty. This is the whole point of ``scripts/kaggle_upload.py``: the
+    1. **The mounted Kaggle Dataset**, when any layout in
+       ``paths.kaggle_mount_patterns`` exists and is non-empty. This is the whole point of ``scripts/kaggle_upload.py``: the
        ~3000 SEN2NAIPv2 pairs are already there, so ``is_cached()`` returns True
        for every sample and the notebook never re-downloads (MEASURED at
        ~10.4 s/sample, i.e. ~8.7 hours of session time). The mount is
@@ -247,9 +293,9 @@ def resolve_cache_dir(cfg: Any) -> Path:
     """
     paths = _require_section(cfg, "paths")
 
-    mount = kaggle_mount_path(cfg)
-    if mount is not None and mount.is_dir() and not _is_empty_dir(mount):
-        return mount.resolve()
+    for mount in kaggle_mount_candidates(cfg):
+        if mount.is_dir() and not _is_empty_dir(mount):
+            return mount.resolve()
 
     if Path("/kaggle").is_dir():
         kaggle_cache = _get(paths, "kaggle_cache_dir", required=False)
