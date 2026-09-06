@@ -41,3 +41,15 @@ kaggle.json
 outputs/**
 !outputs/**/
 !outputs/**/.gitkeep
+
+# Downloaded Kaggle run trees, and generated kernel build folders.
+#
+# These need their own rule even though `outputs/**` already ignores file
+# contents. The `!outputs/**/` negation above deliberately un-ignores every
+# DIRECTORY under outputs/ to keep the skeleton in the repo -- and a kernel
+# output downloaded by scripts/kaggle_run.py can contain a full clone of this
+# repository, .git included. Git adds such a directory as an embedded gitlink
+# regardless of the file-level ignore, which is how one reached a commit on
+# 2026-09-06. Generated notebooks land here too and are build artefacts.
+outputs/kaggle/
+outputs/kaggle_kernels/
