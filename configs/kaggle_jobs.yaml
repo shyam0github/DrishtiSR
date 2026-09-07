@@ -71,7 +71,28 @@ defaults:
     # UNDECLARED dependency of tacoreader 2.1.0 -- tacoreader/dataset.py imports
     # pydantic but the package metadata does not list it, so `import tacoreader`
     # fails outright without this. Do not remove.
+    #
+    # This pin makes pip warn that the image's gradio wants pydantic<=2.12.3.
+    # Cosmetic: nothing in this project imports gradio, and the run that
+    # produced the warning went on to load the catalog correctly.
     - pydantic==2.13.5
+
+  # Installed in a SECOND pip pass, with --no-deps. These are packages whose
+  # declared dependencies would make pip re-resolve something the Kaggle image
+  # already has correctly.
+  #
+  # MEASURED 2026-09-07: the second real `baseline` run got past tacoreader and
+  # then died on "ModuleNotFoundError: No module named 'lpips'" -- LPIPS is in
+  # cfg.metrics.enabled, so a baseline that reports it needs the package. lpips
+  # 0.1.4 declares torch, torchvision, numpy, scipy and tqdm; all of those are
+  # already correct on the image, and letting pip act on them risks resolving a
+  # different torch than the preinstalled CUDA build. requirements.txt says the
+  # same thing about the local install.
+  #
+  # LPIPS downloads ~233 MB of torchvision AlexNet weights on first use, so the
+  # job needs enable_internet (it has it) and pays that once per session.
+  pip_packages_no_deps:
+    - lpips==0.1.4
 
   # Kaggle needs internet to clone from GitHub and to pip install. A job with
   # this false cannot bootstrap at all; it is here to be explicit, not to tune.

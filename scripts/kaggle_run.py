@@ -710,6 +710,12 @@ def build_tokens(
         "REPO_URL": repr(url),
         "WORKDIR": repr(str(job.workdir)),
         "PIP_PACKAGES": repr([str(pkg) for pkg in (job.get("pip_packages") or [])]),
+        # Installed in a second pass with --no-deps, for packages whose
+        # declared dependencies would re-resolve something the Kaggle image
+        # already has correctly -- lpips would drag in a torch of its own.
+        "PIP_PACKAGES_NO_DEPS": repr(
+            [str(pkg) for pkg in (job.get("pip_packages_no_deps") or [])]
+        ),
         "GUARD_SCRIPT": repr(str(job.guard_script)),
         "GUARD_ARGS": repr(guard_args),
         "GUARD_ENABLED": repr(bool(job.guard_data_root)),

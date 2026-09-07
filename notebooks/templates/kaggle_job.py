@@ -78,6 +78,18 @@ from src.utils.kaggle_session import (
 
 pip_install({{PIP_PACKAGES}}, note="(the Kaggle image already has the rest)")
 
+# A SECOND call, with --no-deps, for packages whose declared dependencies would
+# re-resolve something the Kaggle image already has correctly. lpips 0.1.4
+# declares torch/torchvision/numpy/scipy/tqdm; letting pip act on those risks
+# pulling a different torch than the preinstalled CUDA build. See the note above
+# lpips in requirements.txt, and cfg pip_packages_no_deps in
+# configs/kaggle_jobs.yaml. Empty is a no-op and says so.
+pip_install(
+    {{PIP_PACKAGES_NO_DEPS}},
+    note="(--no-deps: their dependencies are already correct on this image)",
+    extra_args=["--no-deps"],
+)
+
 # %%
 # 3. Stage the manifest and split CSVs out of the mounted dataset into outputs/.
 #
