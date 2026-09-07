@@ -22,7 +22,7 @@
 # | | |
 # |---|---|
 # | commit | `{{GIT_SHA}}` |
-# | entry point | `{{ENTRY_SCRIPT}} {{ENTRY_ARGS_DISPLAY}}` |
+# | entry point | `{{ENTRY_DISPLAY}}` |
 # | accelerator | {{ACCELERATOR_DISPLAY}} |
 # | expected runtime | {{EXPECTED_RUNTIME_DISPLAY}} |
 #
@@ -73,6 +73,7 @@ from src.utils.kaggle_session import (
     pip_install,
     prune_workdir,
     run_entry,
+    run_module,
     stage_supporting_files,
 )
 
@@ -117,7 +118,9 @@ guard_data_root(
 
 # %%
 # 5. The job itself.
-run_entry({{ENTRY_SCRIPT_LITERAL}}, args={{ENTRY_ARGS}})
+# Either run_entry('scripts/x.py', ...) or run_module('drishtisr.train', ...),
+# chosen by the job's 'entry' / 'entry_module' key in configs/kaggle_jobs.yaml.
+{{ENTRY_CALL}}
 
 # %%
 # 6. What was produced. Everything under /kaggle/working is retrievable with

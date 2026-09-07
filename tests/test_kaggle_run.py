@@ -260,6 +260,29 @@ def test_defaults_are_merged_into_every_job(jobs):
             assert key in job, f"job {name!r} lacks {key!r}"
 
 
+def test_every_job_declares_exactly_one_entry_point(jobs):
+    """A job runs a script path OR a ``python -m`` module, never both or neither.
+
+    Both is ambiguous about what actually ran; neither renders a notebook whose
+    final cell does nothing and still reports the run successful.
+    """
+    for name, job in jobs.items():
+        declared = [key for key in kr.ENTRY_KEYS if job.get(key)]
+        assert len(declared) == 1, f"job {name!r} declares {declared or 'neither'}"
+
+
+def test_a_module_entry_point_resolves_to_a_real_file(jobs):
+    """``drishtisr.train`` must map to ``src/train.py`` through the alias
+    package's ``__path__``. Checked here, in milliseconds, rather than on Kaggle
+    after the queue wait and the pip installs."""
+    for name, job in jobs.items():
+        if job.get("entry_module"):
+            assert kr.entry_point_path(job).is_file(), (
+                f"job {name!r} runs -m {job.entry_module}, which resolves to "
+                f"{kr.entry_point_path(job)} -- not a file"
+            )
+
+
 def test_jobs_mount_the_cache_dataset_the_resolver_looks_for(cfg, jobs):
     """The mount path is composed from ``paths.kaggle_dataset_dir``. A job that
     mounts a different dataset produces an empty data root and a run that
@@ -288,15 +311,24 @@ def test_jobs_do_not_install_the_pinned_requirements_file(jobs):
 
 
 def test_an_unknown_job_lists_the_known_ones(cfg):
-    with pytest.raises(kr.RunError, match="Defined jobs: baseline, train, verify"):
+    with pytest.raises(kr.RunError, match="Defined jobs: baseline, runa, train, verify"):
         kr.resolve_job(cfg, "no-such-job")
 
 
 def test_an_incomplete_job_is_refused_by_name(tmp_path):
     path = tmp_path / "jobs.yaml"
-    path.write_text("jobs:\n  half:\n    title: A job\n", encoding="utf-8")
+    # An entry point is supplied so this reaches the MISSING-KEYS branch, which
+    # is what this test is about; without one it stops at the entry-point check.
+    path.write_text(
+        "jobs:\n  half:\n    title: A job\n    entry: scripts/x.py\n", encoding="utf-8"
+    )
     with pytest.raises(kr.RunError, match="'half'.*is missing"):
-        kr.validate_job("half", OmegaConf.create({"title": "A job"}), path, "half")
+        kr.validate_job(
+            "half",
+            OmegaConf.create({"title": "A job", "entry": "scripts/x.py"}),
+            path,
+            "half",
+        )
 
 
 # -- the naming drift guard ------------------------------------------------
@@ -330,7 +362,8 @@ def test_every_job_title_slugifies_to_its_kernel_slug(cfg, jobs):
 def test_a_title_that_would_land_elsewhere_is_refused(tmp_path):
     """The exact configuration that produced the unreachable kernel."""
     job = OmegaConf.create(
-        {key: "x" for key in kr.REQUIRED_JOB_KEYS} | {"title": "DrishtiSR verify data root"}
+        {key: "x" for key in kr.REQUIRED_JOB_KEYS}
+        | {"title": "DrishtiSR verify data root", "entry": "scripts/x.py"}
     )
     with pytest.raises(kr.RunError, match="does not match its kernel slug"):
         kr.validate_job("verify", job, tmp_path / "jobs.yaml", "drishtisr-verify")

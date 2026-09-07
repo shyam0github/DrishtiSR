@@ -163,3 +163,81 @@ jobs:
     entry: scripts/train.py
     entry_args: ["--config", "configs/base.yaml"]
     expected_runtime_min: 480
+
+  # ------------------------------------------------------------------ runA ---
+  # Run A: the EDSR-baseline L1 reference run. No uncertainty head, no spectral
+  # loss -- this is the number every later contribution is measured against.
+  #
+  # Entry point is a MODULE, not a script. src/train.py imports
+  # `drishtisr.models.edsr` and the adapter imports `src.data.loader`; only
+  # `python -m` puts the clone root on sys.path so that both names resolve. See
+  # run_module() in src/utils/kaggle_session.py and drishtisr/__init__.py.
+  runa:
+    title: DrishtiSR runA
+    description: >
+      Run A baseline: EDSR-baseline (16 blocks, 64 feats, 4-band RGBN,
+      1,518,724 params) trained with L1 only for 40k iterations at batch 16 on
+      64px LR patches, x4. Cosine schedule with warmup, AMP on, resumable from
+      /kaggle/working/runs/runA/last.pt so a killed session continues rather
+      than restarts.
+    enable_gpu: true
+    accelerator: NvidiaTeslaT4
+    entry_module: drishtisr.train
+    entry_args:
+      - "--data-module"
+      - "src.data.adapter"
+      - "--data-class"
+      - "SRPatchDataset"
+      # NOT a literal mount path. MEASURED 2026-09-06: the live mount is
+      # /kaggle/input/datasets/<owner>/<slug>, not /kaggle/input/<slug>, so a
+      # spelled-out root is wrong on exactly the machine that costs GPU-hours.
+      # "auto" defers to src/utils/paths.resolve_cache_dir, the only thing in
+      # this project allowed to decide where data lives.
+      - "--data-root"
+      - "auto"
+      - "--iters"
+      - "40000"
+      - "--batch"
+      - "16"
+      - "--patch-lr"
+      - "64"
+      - "--scale"
+      - "4"
+      # 4 = RGBN, the four bands of dataset.bands. This is what makes the
+      # parameter count 1,518,724; in-ch 3 would give 1,517,571.
+      - "--in-ch"
+      - "4"
+      - "--lr"
+      - "2e-4"
+      - "--min-lr"
+      - "1e-6"
+      - "--warmup"
+      - "500"
+      - "--wd"
+      - "1e-4"
+      - "--clip"
+      - "1.0"
+      - "--val-every"
+      - "2000"
+      - "--ckpt-every"
+      - "2500"
+      - "--log-every"
+      - "100"
+      - "--amp"
+      - "1"
+      - "--workers"
+      - "2"
+      - "--seed"
+      - "1337"
+      # Under Kaggle's 9-hour ceiling, so the loop checkpoints and exits
+      # cleanly instead of being killed mid-write.
+      - "--max-hours"
+      - "8.5"
+      - "--resume"
+      - "auto"
+      # Outside the clone (workdir) on purpose: prune_workdir() clears the
+      # clone at the end of a successful run, and /kaggle/working is what
+      # Kaggle saves, so checkpoints here survive and are fetchable.
+      - "--out"
+      - "/kaggle/working/runs/runA"
+    expected_runtime_min: 510

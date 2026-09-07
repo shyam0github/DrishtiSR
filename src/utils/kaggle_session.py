@@ -15,6 +15,7 @@ Two notebooks use it, and they are different shapes:
    mounted dataset, so the split is READ rather than recomputed.
 3. :func:`guard_data_root`        -- prove the session can see its data, or abort.
 4. :func:`run_entry`              -- run one ``scripts/*.py`` entry point.
+   :func:`run_module`             -- run one ``python -m <module>`` entry point.
 5. :func:`inventory_outputs`      -- say what the run actually produced.
 6. :func:`prune_workdir`          -- leave results, not a copy of the source tree.
 
@@ -60,6 +61,7 @@ __all__ = [
     "stage_supporting_files",
     "guard_data_root",
     "run_entry",
+    "run_module",
     "inventory_outputs",
     "prune_workdir",
     "environment_report",
@@ -463,6 +465,53 @@ def run_entry(
             "`python scripts/kaggle_run.py logs --job <name>`."
         )
     print(f"\n{script} completed successfully.", flush=True)
+
+
+def run_module(
+    module: str,
+    args: Sequence[str] = (),
+    repo_dir: Optional[str] = None,
+) -> None:
+    """Run one entry point as ``python -m <module>`` and fail loudly if it fails.
+
+    WHY THIS EXISTS ALONGSIDE :func:`run_entry`. ``run_entry`` executes a script
+    by path, which puts the SCRIPT'S directory on ``sys.path`` -- not the
+    repository root. ``src/train.py`` imports ``drishtisr.models.edsr``, and
+    ``src/data/adapter.py`` imports ``src.data.loader``; both of those names
+    resolve only when the REPOSITORY ROOT is on the path. ``python src/train.py``
+    therefore dies on an import, while ``python -m drishtisr.train`` works,
+    because ``-m`` puts the working directory on ``sys.path`` and the session's
+    working directory is the clone root. This is the invocation the
+    ``drishtisr`` alias package was written for; see its docstring.
+
+    Args:
+        module: Importable module path, e.g. ``"drishtisr.train"``. Run with
+            ``-m``, so it executes under ``__name__ == "__main__"``.
+        args: Its arguments, already split.
+        repo_dir: Working directory. None means the current one, which is the
+            clone root -- and which is precisely what makes ``-m`` resolve.
+
+    Raises:
+        SessionAborted: The module exited non-zero. Re-raised so the Kaggle
+            kernel run is marked failed; a notebook that swallowed this would
+            report success for a run that produced nothing.
+    """
+    print("=" * 78, flush=True)
+    print(f"  JOB: -m {module} {' '.join(str(arg) for arg in args)}".rstrip(), flush=True)
+    print("=" * 78, flush=True)
+    code = _stream(
+        [sys.executable, "-m", str(module), *[str(arg) for arg in args]],
+        f"the job entry point -m {module}",
+        cwd=Path(repo_dir) if repo_dir else None,
+    )
+    if code != 0:
+        raise SessionAborted(
+            f"-m {module} exited with code {code}. The traceback is in the "
+            "output above; pull it locally with "
+            "`python scripts/kaggle_run.py logs --job <name>`."
+        )
+    print()
+    print(f"-m {module} completed successfully.", flush=True)
 
 
 def prune_workdir(keep: Sequence[str], repo_dir: Optional[str] = None) -> None:

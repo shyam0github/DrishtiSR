@@ -44,6 +44,7 @@ from src.data.loader import PatchDataset, resolve_split_assignments, select_indi
 from src.data.registry import get_dataset_class
 from src.utils.config import load_config
 from src.utils.logging import get_logger
+from src.utils.paths import resolve_cache_dir
 
 __all__ = ["SRPatchDataset"]
 
@@ -80,7 +81,12 @@ class SRPatchDataset(Dataset):
                 subset directory (e.g. ``outputs/cache``, which holds
                 ``sen2naipv2-crosssensor/``). The subset directory itself is
                 also accepted and its parent used, since that is the path a
-                caller is most likely to have to hand.
+                caller is most likely to have to hand. The literal string
+                ``"auto"`` resolves the location through
+                ``src.utils.paths.resolve_cache_dir`` instead, which is the
+                only thing in this project allowed to decide where data lives;
+                use it from Kaggle jobs, whose mount path is not the one a
+                dataset slug suggests.
             split: ``"train"``, ``"val"`` or ``"test"``; matched against the
                 ``split`` column of the split CSV.
             patch_lr: LR patch edge in pixels. Overrides ``cfg.patches.lr_size``.
@@ -95,7 +101,8 @@ class SRPatchDataset(Dataset):
 
         Raises:
             FileNotFoundError: ``root`` does not exist, or holds no subset
-                directory for the configured subset.
+                directory for the configured subset. From ``"auto"``, raised by
+                ``resolve_cache_dir`` when no candidate mount is present.
             SplitError: The split is empty, or the split file does not cover the
                 dataset.
         """
@@ -174,8 +181,25 @@ class SRPatchDataset(Dataset):
         Raises:
             FileNotFoundError: Neither interpretation of ``root`` exists.
         """
-        path = Path(str(root)).expanduser()
         subset = str(load_config(config)["sen2naipv2"]["subset"])
+
+        # "auto" defers to the project's single path authority instead of
+        # trusting a literal the caller typed. MEASURED 2026-09-06: the live
+        # Kaggle mount is /kaggle/input/datasets/<owner>/<slug>, NOT the
+        # /kaggle/input/<slug> that a job definition would naturally spell --
+        # so a hardcoded --data-root is wrong on exactly the machine that
+        # costs GPU-hours to be wrong on. resolve_cache_dir() tries both
+        # layouts (paths.kaggle_mount_patterns) and carries no username.
+        if str(root).strip().lower() == "auto":
+            resolved = Path(resolve_cache_dir(load_config(config)))
+            # resolve_cache_dir returns the directory CONTAINING the subset on
+            # a mount, but the local cache root itself otherwise; normalise to
+            # the same "parent of subset" contract as the explicit branches.
+            if resolved.name == subset:
+                return resolved.parent
+            return resolved
+
+        path = Path(str(root)).expanduser()
 
         if (path / subset).is_dir():
             return path

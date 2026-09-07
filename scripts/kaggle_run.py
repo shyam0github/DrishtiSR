@@ -187,9 +187,15 @@ def load_jobs(cfg: Any) -> DictConfig:
 # does not say whether it wants a GPU is a job whose cost is unknown, and
 # guessing either way is the wrong thing to do with a 30-hour weekly budget.
 REQUIRED_JOB_KEYS = (
-    "title", "entry", "enable_gpu", "enable_internet",
+    "title", "enable_gpu", "enable_internet",
     "template", "workdir", "guard_script", "guard_data_root",
 )
+
+# A job names its entry point EITHER as a script path (`entry`) or as an
+# importable module run with -m (`entry_module`). Exactly one, checked in
+# validate_job(): a job with both is ambiguous about what actually runs, and a
+# job with neither renders a notebook whose last cell does nothing.
+ENTRY_KEYS = ("entry", "entry_module")
 
 
 def slugify(text: str) -> str:
@@ -220,13 +226,27 @@ def validate_job(name: str, job: Any, path: Path, expected_slug: str) -> None:
         RunError: A required key is absent, or the title does not slugify to the
             kernel slug -- see below, this one is not cosmetic.
     """
+    declared = [key for key in ENTRY_KEYS if job.get(key)]
+    if len(declared) != 1:
+        raise RunError(
+            f"The job {name!r} in {path} must set exactly one of "
+            f"{' or '.join(ENTRY_KEYS)}; it sets "
+            + (", ".join(declared) if declared else "neither")
+            + "." + "\n"
+            "Use 'entry' for a script run by path (scripts/run_baseline.py) and "
+            "'entry_module' for one run as `python -m <module>` "
+            "(drishtisr.train). The module form is what code importing both "
+            "`drishtisr.*` and `src.*` needs, because only -m puts the clone "
+            "root on sys.path."
+        )
+
     missing = [key for key in REQUIRED_JOB_KEYS if key not in job]
     if missing:
         raise RunError(
             f"The job {name!r} in {path} is missing: {', '.join(missing)}.\n"
             "Keys shared by every job belong in the 'defaults:' block at the top "
-            "of that file; 'title', 'entry' and 'enable_gpu' are per-job and "
-            "deliberately have no default."
+            "of that file; 'title', the entry point and 'enable_gpu' are per-job "
+            "and deliberately have no default."
         )
 
     # THE DRIFT GUARD. MEASURED, not assumed: pushing a kernel whose
@@ -678,7 +698,7 @@ def build_tokens(
     """Assemble the template substitutions for one job.
 
     Values destined for Python code are ``repr``'d here, so the template can
-    write ``run_entry({{ENTRY_SCRIPT_LITERAL}})`` and get a correctly quoted
+    write ``{{ENTRY_CALL}}`` and get a correctly quoted
     string with no escaping rules of its own.
 
     Args:
@@ -691,7 +711,8 @@ def build_tokens(
     Returns:
         Token name to replacement text.
     """
-    entry = str(job.entry)
+    entry = str(job.get("entry") or "")
+    entry_module = str(job.get("entry_module") or "")
     entry_args = [str(arg) for arg in (job.get("entry_args") or [])]
     guard_args = [str(arg) for arg in (job.get("guard_args") or [])]
     runtime_min = int(job.get("expected_runtime_min") or 0)
@@ -723,10 +744,18 @@ def build_tokens(
         # manifest/split file names. Taken from the job's own arguments by
         # config_path_for(), so it cannot disagree with the entry point.
         "CONFIG_PATH_LITERAL": repr(config_path_for(job)),
-        "ENTRY_SCRIPT": entry,
-        "ENTRY_SCRIPT_LITERAL": repr(entry),
         "ENTRY_ARGS": repr(entry_args),
-        "ENTRY_ARGS_DISPLAY": " ".join(entry_args),
+        # The generated notebook calls ONE of run_entry/run_module. Deciding it
+        # here rather than with an `if` in the template keeps the template free
+        # of job-shaped logic, which is the rule this file exists to enforce.
+        "ENTRY_CALL": (
+            f"run_module({entry_module!r}, args={entry_args!r})"
+            if entry_module
+            else f"run_entry({entry!r}, args={entry_args!r})"
+        ),
+        "ENTRY_DISPLAY": " ".join(
+            ([f"python -m {entry_module}"] if entry_module else [entry]) + entry_args
+        ),
         "OUTPUT_DIRS": repr([str(item) for item in (job.get("output_dirs") or [])]),
         "ACCELERATOR_DISPLAY": accelerator if job.enable_gpu else "CPU only",
         "EXPECTED_RUNTIME_DISPLAY": (
@@ -799,6 +828,33 @@ def kernel_metadata(
     return metadata
 
 
+def entry_point_path(job: Any) -> Path:
+    """The file a job's entry point resolves to, for the pre-flight check.
+
+    Both entry forms are checkable here, in milliseconds, instead of on Kaggle
+    after the queue wait and the pip installs. A module is mapped to a file
+    through the same rule the ``drishtisr`` alias package uses -- its
+    ``__path__`` points at ``src/`` -- so ``drishtisr.train`` is ``src/train.py``.
+    Any other top-level package is resolved as a plain dotted path from the
+    repository root.
+
+    Args:
+        job: The merged job definition.
+
+    Returns:
+        The absolute path the entry point is expected to live at. Existence is
+        the caller's to check, so it can raise with its own message.
+    """
+    entry = str(job.get("entry") or "")
+    if entry:
+        return repo_path(entry)
+
+    parts = str(job.get("entry_module") or "").split(".")
+    if parts and parts[0] == "drishtisr":
+        parts = ["src"] + parts[1:]
+    return repo_path("/".join(parts) + ".py")
+
+
 def generate_kernel(
     cfg: Any, username: str, job_name: str, job: Any, sha: str, logger: Any
 ) -> Tuple[Path, Dict[str, Any]]:
@@ -828,10 +884,11 @@ def generate_kernel(
             "at the right file."
         )
 
-    entry_path = repo_path(job.entry)
+    entry_path = entry_point_path(job)
     if not entry_path.is_file():
         raise RunError(
-            f"This job's entry point does not exist: {job.entry}\n"
+            "This job's entry point does not exist: "
+            f"{job.get('entry') or '-m ' + str(job.get('entry_module'))}\n"
             f"  Looked at: {entry_path}\n"
             "\n"
             "The Kaggle session would clone the repo, install packages, pass the "
@@ -1667,7 +1724,8 @@ def cmd_jobs(args, cfg, logger) -> int:
         runtime_min = int(job.get("expected_runtime_min") or 0)
         expected = human_duration(runtime_min * 60) if runtime_min else "unknown"
         guard = "on" if job.guard_data_root else "off"
-        print(f"  {name:<12} {accel:<16} {guard:<6} {expected:<12} {job.entry}")
+        shown = job.get("entry") or f'-m {job.get("entry_module")}'
+        print(f"  {name:<12} {accel:<16} {guard:<6} {expected:<12} {shown}")
 
     rule("STATE ON KAGGLE")
     for name in jobs:
