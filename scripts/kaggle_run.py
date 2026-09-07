@@ -856,8 +856,22 @@ def kernel_metadata(
         # T4 is sm_75, which that same build covers. So GPU jobs pin
         # cfg.kaggle_run.accelerator = NvidiaTeslaT4 and a job may override it
         # only deliberately.
+        #
+        # THE KEY IS "machine_shape", NOT "accelerator". MEASURED 2026-09-07,
+        # the expensive way: the first runA job was pushed with
+        # "accelerator": "NvidiaTeslaT4" and Kaggle ran it on a Tesla
+        # P100-PCIE-16GB anyway, which died on the first CUDA op exactly as the
+        # note above predicts. The value was right and the key was wrong --
+        # kaggle_api_extended.py does
+        #     request.machine_shape = acc or get_or_default(meta, "machine_shape")
+        # so an "accelerator" key is read by nothing, no error is raised, and
+        # the session silently falls back to Kaggle's default GPU. A wrong
+        # accelerator is not a warning here; it is the whole run.
+        #
+        # Valid values, from kagglesdk ApiSaveKernelRequest.machine_shape:
+        # NvidiaTeslaT4, NvidiaTeslaP100, Tpu1VmV38.
         # ------------------------------------------------------------------
-        metadata["accelerator"] = str(
+        metadata["machine_shape"] = str(
             job.get("accelerator") or cfg.kaggle_run.accelerator
         )
     return metadata

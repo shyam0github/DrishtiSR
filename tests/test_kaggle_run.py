@@ -76,11 +76,25 @@ def test_metadata_carries_the_accelerator_only_for_gpu_jobs(cfg, jobs):
     """A CPU job must not name an accelerator; Kaggle would allocate one."""
     gpu = kr.kernel_metadata(cfg, "someone", "train", jobs["train"])
     assert gpu["enable_gpu"] is True
-    assert gpu["accelerator"] == "NvidiaTeslaT4"
+    assert gpu["machine_shape"] == "NvidiaTeslaT4"
 
     cpu = kr.kernel_metadata(cfg, "someone", "verify", jobs["verify"])
     assert cpu["enable_gpu"] is False
-    assert "accelerator" not in cpu
+    assert "machine_shape" not in cpu
+
+
+def test_the_accelerator_uses_the_key_the_kaggle_cli_actually_reads(cfg, jobs):
+    """MEASURED 2026-09-07: pushed with "accelerator", Kaggle ran the job on a
+    P100 anyway and it died on the first CUDA op. kaggle_api_extended.py reads
+    ``get_or_default(meta_data, "machine_shape")`` and looks at no other key, so
+    an "accelerator" key is silently ignored and the session falls back to
+    Kaggle's default GPU. The value was never wrong; the key was."""
+    gpu = kr.kernel_metadata(cfg, "someone", "runa", jobs["runa"])
+    assert "machine_shape" in gpu, "the only key the CLI reads is missing"
+    assert "accelerator" not in gpu, (
+        "'accelerator' is read by nothing and reads as though the GPU were "
+        "pinned when it is not"
+    )
 
 
 # -- the data guard --------------------------------------------------------
