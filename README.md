@@ -123,6 +123,22 @@ B04/B03/B02/B08, CPU, 6 threads):
 Bicubic is the bar. A model that does not beat it convincingly has not earned its
 place in the submission.
 
+**Reproduced on Kaggle, headless, at a pinned commit.** `push --job baseline`
+ran the same entry point on a fresh CPU session against the mounted cache and
+agreed with the local numbers to ten decimal places — bicubic 38.471676 vs
+38.471676, SSIM 0.882467, SAM 2.092455°, ERGAS 3.050261, LPIPS 0.403318, over
+the same 1,199 validation patches. `nearest` came back bit-identical. The
+residual on bicubic is ~1e-10, which is float non-determinism, not an
+environment difference.
+
+That comparison is only meaningful because the run **read** the split rather
+than recomputing one: `Split read from .../splits_sen2naipv2.csv (3000 samples
+assigned)`, with the manifest and split CSVs staged out of the mounted dataset
+byte-for-byte identical to the local copies. See
+[docs/kaggle_workflow.md](docs/kaggle_workflow.md) — that staging was an open
+gap until this run, and a missing split file does not fail, it silently
+recomputes.
+
 **Benchmarked against `opensr-test` too, so the floor is not only our own
 arithmetic.** ESA OpenSR's suite (Aybar et al., IEEE JSTARS 2024) is an
 independent implementation that asks whether the detail a super-resolver adds is
