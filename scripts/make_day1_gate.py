@@ -84,6 +84,42 @@ def _load(path: Path, produced_by: str) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _grouping_size(alignment: Dict[str, Any], field: str) -> Optional[int]:
+    """How many distinct values of ``field`` the audited sample spans, or None.
+
+    ``selection.groupings`` only carries a field the catalog actually recorded,
+    so it is ``{}`` for a dataset with no geographic metadata -- the synthetic
+    stub, and any future in-memory source. Indexing it directly turned ``--smoke``
+    into a KeyError in the middle of report generation, which is the pre-flight
+    failing for a reason the pre-flight was not testing.
+
+    Args:
+        alignment: The parsed alignment report.
+        field: A grouping name, e.g. ``"crs"``.
+
+    Returns:
+        The number of distinct values, or None when the report does not carry
+        that grouping at all.
+    """
+    counts = alignment.get("selection", {}).get("groupings", {}).get(field)
+    return None if counts is None else len(counts)
+
+
+def _fmt_count(value: Any) -> str:
+    """Format a count that the report may legitimately not carry.
+
+    ``selection.num_distinct_regions`` is null whenever the audited dataset has
+    no geographic grouping metadata to count -- the synthetic stub has none, so
+    ``--smoke`` produced exactly that, and ``int(None)`` failed the pre-flight
+    with a TypeError three stages after the last thing that could have caused it.
+    A count that is genuinely absent is reported as absent; it is not invented,
+    and it is not silently dropped from the table either.
+    """
+    if value is None:
+        return "n/a (not recorded for this dataset)"
+    return str(int(value))
+
+
 def _fmt(value: Any, places: int = 4) -> str:
     try:
         number = float(value)
@@ -232,6 +268,16 @@ def main(argv=None) -> int:
         else None
     )
 
+    # The LPIPS paragraph below compares two numbers, so it is written only when
+    # both exist. LPIPS is disabled under --smoke (it downloads pretrained
+    # weights on first use, and --smoke must not touch the network), and it can
+    # be disabled deliberately with metrics.lpips.enabled=false on a machine with
+    # no internet. Neither case is an error; both used to raise a KeyError from
+    # inside the report template, several stages after the setting that caused it.
+    have_lpips = psnr_gap is not None and all(
+        isinstance(baselines[m]["summary"].get("lpips"), dict) for m in ("bicubic", "nearest")
+    )
+
     generated = _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat()
     settings = osr["settings"]
 
@@ -315,8 +361,8 @@ Source: `outputs/metrics/{cfg.alignment.report_name}`.
 |---|---|
 | pairs audited | {int(alignment['num_pairs'])} of {int(alignment['selection']['num_catalog'])} |
 | sampling | {alignment['selection']['sampling']}, seed {int(alignment['selection']['seed'])} |
-| distinct regions | {int(alignment['selection']['num_distinct_regions'])} |
-| UTM zones | {len(alignment['selection']['groupings']['crs'])} |
+| distinct regions | {_fmt_count(alignment['selection']['num_distinct_regions'])} |
+| UTM zones | {_fmt_count(_grouping_size(alignment, 'crs'))} |
 | **median shift** | **{median_shift:.3f} HR px ({median_shift * hr_gsd:.2f} m)** |
 | p90 shift | {float(alignment['shift']['p90_magnitude']):.3f} px |
 | max shift | {float(alignment['shift']['max_magnitude']):.3f} px |
@@ -344,7 +390,11 @@ data_range = {float(cfg.metrics.data_range)} reflectance, computed on CPU at
 scale on which every later result should be read: it is what the metric can
 express between "did nothing" and "did the free thing".
 
-**LPIPS is the exception and points the other way** — nearest scores
+"""
+        if psnr_gap is not None
+        else ""
+    ) + (
+        f"""**LPIPS is the exception and points the other way** — nearest scores
 {_fmt(baselines['nearest']['summary']['lpips']['mean'])} against bicubic's
 {_fmt(baselines['bicubic']['summary']['lpips']['mean'])}, i.e. replication looks
 *better* perceptually. This is expected and is not a bug: LPIPS rewards
@@ -355,8 +405,12 @@ cannot distinguish real detail from blocky artefact, and the correctness metrics
 in section 5 can.
 
 """
-        if psnr_gap is not None
-        else ""
+        if have_lpips
+        else """**LPIPS is absent from the table above** because
+`metrics.lpips.enabled` was false for this run, so the perceptual comparison
+between bicubic and pixel replication is not made here.
+
+"""
     ) + f"""---
 
 ## 5. Bicubic baseline — external benchmark (`opensr-test` {settings.get('opensr_test_version', '?')})
@@ -502,7 +556,7 @@ value taken on someone else's authority.
 - **The alignment audit is a 50-pair sample of {int(alignment['selection']['num_catalog'])}**,
   not a census. It is a random draw without replacement at seed
   {int(alignment['selection']['seed'])} spanning
-  {int(alignment['selection']['num_distinct_regions'])} distinct regions, which
+  {_fmt_count(alignment['selection']['num_distinct_regions'])} distinct regions, which
   supports the verdict, but no per-pair guarantee is implied for the other
   {int(alignment['selection']['num_catalog']) - int(alignment['num_pairs'])}.
 
