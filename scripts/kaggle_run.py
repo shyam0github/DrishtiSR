@@ -430,7 +430,9 @@ def remote_url(cfg: Any) -> str:
     return url
 
 
-def require_publishable_tree(cfg: Any, logger: Any, enforce: bool = True) -> str:
+def require_publishable_tree(
+    cfg: Any, logger: Any, enforce: bool = True, allow_dirty: bool = False
+) -> str:
     """Refuse to push unless the exact local code is on the remote.
 
     This is the check that exists because of a real lost session. Kaggle clones
@@ -454,6 +456,22 @@ def require_publishable_tree(cfg: Any, logger: Any, enforce: bool = True) -> str
         enforce: False under ``--smoke``, where the same checks run and report
             but a dirty tree is a warning. A smoke run contacts no network, so it
             cannot start a run of the wrong code.
+        allow_dirty: Downgrade check 1 -- and ONLY check 1 -- to a printed
+            warning. Checks 2 and 3 still hold, so what runs is still a commit
+            that is provably on the remote.
+
+            This exists because more than one session edits this repository at
+            once, and check 1 is a whole-tree check: another session's work in
+            progress blocks a launch that has nothing to do with it, and the
+            only ways out are committing someone else's half-finished files or
+            stashing their live work. Both are worse than the risk here.
+
+            It does NOT weaken the guarantee the check was written for. That
+            guarantee is "you cannot be unaware that Kaggle runs a commit rather
+            than your screen", and the flag is explicit, prints every dirty
+            path, and prints the SHA actually being run. What it costs is the
+            automatic proof that the dirty paths are irrelevant to this job --
+            so the caller is the one asserting that, deliberately.
 
     Returns:
         The 40-character HEAD SHA.
@@ -479,7 +497,19 @@ def require_publishable_tree(cfg: Any, logger: Any, enforce: bool = True) -> str
         print(f"{INFO}smoke mode contacts no network. A real push runs both.")
 
     dirty = git("status", "--porcelain", what="checking the working tree")
-    if dirty:
+    if dirty and allow_dirty:
+        listing = "\n".join(f"      {line}" for line in dirty.splitlines()[:20])
+        more = "" if len(dirty.splitlines()) <= 20 else "\n      ..."
+        print(f"{BAD} --allow-dirty: the working tree is NOT clean.")
+        print(f"{INFO}Kaggle will run commit {sha[:12]}, not the files below.")
+        print(listing + more)
+        print(f"{INFO}You are asserting these paths do not affect this job.")
+        logger.warning(
+            "--allow-dirty: pushing %s with %d dirty path(s) in the tree",
+            sha[:12],
+            len(dirty.splitlines()),
+        )
+    elif dirty:
         listing = "\n".join(f"      {line}" for line in dirty.splitlines()[:20])
         more = "" if len(dirty.splitlines()) <= 20 else "\n      ..."
         refuse(
@@ -494,7 +524,12 @@ def require_publishable_tree(cfg: Any, logger: Any, enforce: bool = True) -> str
             f"{listing}{more}\n"
             "\n"
             "Fix: commit and push, then push the job.\n"
-            "  git add -A && git commit -m \"...\" && git push"
+            "  git add -A && git commit -m \"...\" && git push\n"
+            "\n"
+            "If those paths belong to another session and have nothing to do "
+            "with this job, re-run with --allow-dirty. The run still uses a "
+            "commit that is on the remote; you are asserting the dirty paths "
+            "do not affect it."
         )
     else:
         print(f"{OK} working tree is clean")
@@ -1355,13 +1390,16 @@ def cmd_push(args, cfg, logger) -> int:
     identifier = kernel_id(cfg, username, args.job)
 
     rule("CODE THAT WILL RUN")
-    sha = require_publishable_tree(cfg, logger, enforce=not args.smoke)
+    sha = require_publishable_tree(
+        cfg, logger, enforce=not args.smoke, allow_dirty=bool(getattr(args, "allow_dirty", False))
+    )
 
     rule("JOB")
     print(f"{INFO}job          {args.job}")
     print(f"{INFO}kernel       {identifier}")
     entry_args = " ".join(str(arg) for arg in (job.get("entry_args") or []))
-    print(f"{INFO}entry point  {job.entry} {entry_args}".rstrip())
+    shown = job.get("entry") or f"python -m {job.get('entry_module')}"
+    print(f"{INFO}entry point  {shown} {entry_args}".rstrip())
     accel = str(job.get('accelerator') or cfg.kaggle_run.accelerator)
     print(f"{INFO}accelerator  {accel if job.enable_gpu else 'CPU only (enable_gpu: false)'}")
     print(f"{INFO}data guard   {'ON -- aborts the run if the mount fails' if job.guard_data_root else 'off (the entry point IS the check)'}")
@@ -1804,6 +1842,16 @@ def parse_args(argv=None) -> argparse.Namespace:
                 required=True,
                 help="Job name, as defined in configs/kaggle_jobs.yaml "
                 "(verify, baseline, train, ...).",
+            )
+        if name == "push":
+            sub.add_argument(
+                "--allow-dirty",
+                action="store_true",
+                help="Push even though the working tree has uncommitted changes. "
+                "The run still uses a commit proven to be on the remote; every "
+                "dirty path and the SHA being run are printed. For a repository "
+                "several sessions edit at once, where another session's work in "
+                "progress would otherwise block an unrelated launch.",
             )
         if name == "status":
             sub.add_argument(

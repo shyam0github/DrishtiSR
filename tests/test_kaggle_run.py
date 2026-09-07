@@ -566,6 +566,29 @@ def test_a_dirty_tree_refuses_the_push(cfg, monkeypatch):
         kr.require_publishable_tree(cfg, _silent_logger(), enforce=True)
 
 
+def test_allow_dirty_pushes_a_dirty_tree_but_still_demands_the_remote(cfg, monkeypatch):
+    """--allow-dirty exists for a repository several sessions edit at once, where
+    another session's work in progress would block an unrelated launch. It
+    downgrades the working-tree check ONLY: the commit must still be on the
+    remote, because that is what Kaggle actually clones."""
+    sha = "f" * 40
+    monkeypatch.setattr(
+        kr,
+        "git",
+        _fake_git({"status": " M other/session.py", "branch": "  origin/main", "rev-parse": sha}),
+    )
+    assert (
+        kr.require_publishable_tree(cfg, _silent_logger(), enforce=True, allow_dirty=True) == sha
+    )
+
+
+def test_allow_dirty_does_not_excuse_an_unpushed_commit(cfg, monkeypatch):
+    """The dangerous half of the guard survives the flag."""
+    monkeypatch.setattr(kr, "git", _fake_git({"status": " M other/session.py", "branch": ""}))
+    with pytest.raises(kr.RunError, match="not on any remote branch"):
+        kr.require_publishable_tree(cfg, _silent_logger(), enforce=True, allow_dirty=True)
+
+
 def test_an_unpushed_commit_refuses_the_push(cfg, monkeypatch):
     monkeypatch.setattr(kr, "git", _fake_git({"status": "", "branch": ""}))
     with pytest.raises(kr.RunError, match="not on any remote branch"):
