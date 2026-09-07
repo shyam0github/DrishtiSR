@@ -318,6 +318,34 @@ python scripts/kaggle_upload.py stage
 python scripts/kaggle_upload.py push
 ```
 
+Verified on the first real `baseline` run: the mount resolved to
+`/kaggle/input/datasets/<owner>/drishtisr-sen2naipv2-cache` — the owner-nested
+layout, found by the resolver rather than assumed — and both CSVs copied at
+1,294,503 and 281,457 bytes, byte-for-byte the local files.
+
+## `verify` passing does not mean `baseline` will
+
+Learnt the hard way on that same run, which died three minutes in with
+`ImportError: tacoreader is required for the sen2naipv2 dataset` — *after* the
+staging and the guard had both passed.
+
+`scripts/verify_data_root.py` reads `.npz` files and CSVs directly and never
+touches the dataset catalogue. Any job that builds dataloaders does:
+`build_dataloaders` → `resolve_split_assignments` → `_split_records` reads
+`dataset.catalog` to enumerate sample ids, and for SEN2NAIPv2 that lazily loads
+the TACO catalogue over HTTP. **It does this even when every sample is cached
+and the split CSV is present** — the catalogue is only being used for the list
+of ids, which the staged manifest already contains.
+
+`tacoreader==2.1.0` and its undeclared `pydantic` dependency are now in the
+shared `defaults.pip_packages`, not on the two jobs that need them, because
+`train` would have hit exactly this after queueing for a GPU.
+
+Worth fixing properly at some point: a fully cached run should not need the
+network at all. Sourcing `_split_records` from the staged manifest when it
+covers the dataset would remove both the dependency and a HuggingFace outage
+from the critical path of every CPU job.
+
 Related tooling: [`scripts/kaggle_upload.py`](../scripts/kaggle_upload.py)
 publishes the SEN2NAIPv2 sample cache as the Kaggle Dataset every job mounts.
 `verify` is the job to run after re-uploading it.

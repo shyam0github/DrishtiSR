@@ -44,8 +44,34 @@ defaults:
   # file pins numpy/pandas/scipy/pillow, and installing those pins on Kaggle
   # downgrades packages the preinstalled PyTorch was built against -- minutes of
   # session time, and an image where CUDA may no longer import.
+  #
+  # MEASURED 2026-09-07, the hard way: the first real `baseline` run died three
+  # minutes in with "ImportError: tacoreader is required for the sen2naipv2
+  # dataset". The `verify` job had passed, which is why this went unnoticed --
+  # verify_data_root.py reads .npz files and CSVs directly and never touches the
+  # catalog, while ANY job that builds dataloaders does. build_dataloaders ->
+  # resolve_split_assignments -> _split_records reads dataset.catalog to
+  # enumerate sample_ids, and for SEN2NAIPv2 that lazily loads the TACO catalog,
+  # which needs tacoreader. It does so even when every sample is cached and the
+  # split CSV is present. See the note in docs/kaggle_workflow.md.
+  #
+  # In the shared defaults rather than on the two jobs that need it: `train`
+  # would have hit exactly this, after queueing for a GPU. The install costs
+  # `verify` about half a minute and buys the rest of the jobs a failure mode
+  # that cannot recur.
+  #
+  # These are catalog dependencies only -- none of them pulls numpy, so the
+  # opencv/numpy hazard documented in requirements.txt is not in play here.
   pip_packages:
     - omegaconf==2.3.0
+    # Pinned for the same reason as in requirements.txt: we use tacoreader.v1,
+    # which upstream calls legacy. An unpinned 2.x that drops it breaks the data
+    # layer with no warning.
+    - tacoreader==2.1.0
+    # UNDECLARED dependency of tacoreader 2.1.0 -- tacoreader/dataset.py imports
+    # pydantic but the package metadata does not list it, so `import tacoreader`
+    # fails outright without this. Do not remove.
+    - pydantic==2.13.5
 
   # Kaggle needs internet to clone from GitHub and to pip install. A job with
   # this false cannot bootstrap at all; it is here to be explicit, not to tune.
