@@ -764,6 +764,26 @@ smoke:
     name: synthetic_stub
   synthetic_stub:
     num_samples: 12
+  eval_runA:
+    # There is no trained checkpoint for the synthetic stub, and inventing one
+    # in code would leave the checkpoint-loading path -- the part most likely to
+    # break on a format change -- untested. So --smoke FABRICATES a complete run
+    # directory instead: a freshly initialised EDSR saved in the real
+    # checkpoint format, a real args.json, and a short log.csv. Everything
+    # downstream (load, evaluate, gate, report, curve figure) then runs exactly
+    # as it does for real, on files that were genuinely written and read back.
+    fabricate_run: true
+    # Iterations represented in the fabricated log.csv, so the curve figure has
+    # both a loss trace and several validation points to draw.
+    fabricate_iters: 1200
+    # Separate paths, for the same reason cfg.smoke.alignment has them: a report
+    # full of stub numbers sitting at the real report's path is the kind of
+    # thing that gets read later and believed.
+    run_dir: outputs/eval_runA_smoke
+    report_md: outputs/metrics/day2_runA_smoke.md
+    report_json: outputs/metrics/day2_runA_smoke.json
+    curves_figure: outputs/figures/day2_curves_smoke.png
+    per_sample_csv_name: "day2_runA_smoke_{method}.csv"
   train:
     batch_size: 2
     num_workers: 0
@@ -993,3 +1013,106 @@ runtime:
   # Deployment target: INT8 ONNX on CPU. Enforced by the export/benchmark scripts.
   num_threads: 6
   max_parameters: 1000000
+
+# Run A evaluation: the trained EDSR-baseline checkpoint against the bicubic
+# floor, read by scripts/eval_runA.py.
+#
+# THE POINT OF THIS BLOCK is that the comparison is honest by construction. The
+# script does not re-implement a validation loop: it calls the same
+# build_dataloaders() and the same metrics.aggregate.Evaluator that produced
+# outputs/metrics/baseline_bicubic.json on Day 1, and re-scores bicubic in the
+# same pass rather than quoting the stored number. Two runs of the same code on
+# the same split are comparable; a stored number next to a fresh one is not,
+# because nothing proves the split, the patch grid, or the LPIPS backbone did
+# not move in between.
+eval_runA:
+  # Where the fetched Kaggle artefacts live. Relative to the repository root.
+  # scripts/kaggle_run.py fetch drops them under outputs/kaggle/runa/; they are
+  # copied here because outputs/ is gitignored wholesale and a checkpoint that
+  # a report quotes must have a stable path.
+  run_dir: runs/runA
+  # Names inside run_dir. best.pt is the checkpoint selected by the training
+  # loop's own periodic validation, which is a 25-batch subsample -- NOT the
+  # full-split number this script computes.
+  checkpoint_name: best.pt
+  args_name: args.json
+  log_csv_name: log.csv
+
+  # Registry name for src/models/edsr.build_model. The ARCHITECTURE ITSELF is
+  # not configured here: it is read from the "args" dict inside the checkpoint,
+  # which is what the run actually used. A config value would be a second,
+  # unverifiable claim about a file that already carries the truth.
+  model_name: edsr_baseline
+
+  # Method labels used in the table, the JSON, and the per-sample CSV names.
+  bicubic_label: bicubic
+  model_label: edsr_runA
+
+  # Outputs. reports/ is versioned on purpose -- these are submission material.
+  report_md: reports/day2_runA.md
+  report_json: reports/day2_runA.json
+  curves_figure: reports/day2_curves.png
+  # Per-sample rows go to the gitignored metrics directory, like every other
+  # evaluation: 1199 rows per method is not report material, but it is what
+  # answers "where does it fail".
+  per_sample_csv_name: "day2_runA_{method}.csv"
+
+  # THE HARD GATE. The model must beat bicubic on every one of these, in the
+  # stated direction, or it does not ship. Listed here rather than in code so
+  # the criterion is visible next to the numbers it judges.
+  #
+  # "higher"/"lower" is the direction that counts as an improvement; the column
+  # names are the keys of the Evaluator summary.
+  gate:
+    psnr_mean: higher
+    ssim_mean: higher
+    lpips: lower
+
+  # Training-curve figure (scripts/eval_runA.py, src/eval/curves.py).
+  curves_dpi: 130
+  # Smoothing window for the training-loss trace, in logged points. The raw
+  # per-100-iteration loss is noisy enough to hide the trend; the raw trace is
+  # drawn underneath at low alpha so the smoothing cannot conceal anything.
+  curves_loss_smooth: 9
+
+# Publishing the Run A checkpoint to the Hugging Face Hub, read by
+# scripts/push_to_hf.py.
+#
+# THE PUSH IS GATED ON THE EVALUATION, in code: the script refuses to upload
+# unless reports/day2_runA.json records a PASSED gate. Publishing a checkpoint
+# is not reversible in any way that matters -- the weights are fetched, cached
+# and cited by other people -- so "the gate failed but push anyway" must not be
+# a thing that can happen by typing one flag in a hurry.
+huggingface:
+  # Repository NAME only. The owner comes from whoami() on the token, so no
+  # username enters version control and the repo works for anyone who clones it.
+  repo_name: drishtisr-edsr-baseline-x4
+  repo_type: model
+
+  # PRIVATE BY DEFAULT, same reasoning as kaggle_jobs.yaml's is_private: a model
+  # is a public artefact the moment it is not, and going public is a one-click
+  # change on the Hub while un-publishing weights someone has already downloaded
+  # is not. Set false here (or pass --public) when the repo is meant to ship.
+  private: true
+
+  # Environment variable holding the write token. NEVER put a token in this
+  # file: it is version-controlled.
+  token_env: HF_TOKEN
+
+  # Files copied out of cfg.eval_runA.run_dir, verbatim. The model card is
+  # GENERATED from the evaluation report (src/export/model_card.py) rather than
+  # listed here, so its numbers cannot drift from the ones that were measured.
+  files:
+    - best.pt
+    - args.json
+    - log.csv
+  card_name: README.md
+
+  # Where the generated card is written locally before upload, so it can be read
+  # and diffed rather than only existing on the Hub.
+  card_output: reports/hf_model_card.md
+
+  commit_message: >
+    Run A: EDSR-baseline x4 for Sentinel-2 10 m -> 2.5 m, 4-band RGBN.
+    L1 only, 40k iterations. Beats bicubic on PSNR, SSIM and LPIPS over the
+    full 1199-patch validation split.
