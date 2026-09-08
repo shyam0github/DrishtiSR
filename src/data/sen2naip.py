@@ -39,6 +39,7 @@ the empty result and re-raise with the actual reason.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
@@ -47,6 +48,16 @@ import numpy as np
 import torch
 
 from src.data.base import SRPairDataset
+from src.data.cache_manifest import (
+    UNREADABLE_CACHE_ERRORS,
+    CacheValidationError,
+    append_record,
+    make_record,
+    manifest_path,
+    npz_member_shape,
+    read_manifest,
+    validate_pair,
+)
 from src.data.registry import register_dataset
 from src.data.splits import parse_wkt_point
 from src.utils.logging import get_logger
@@ -89,6 +100,9 @@ class SEN2NAIPv2Dataset(SRPairDataset):
 
         ds_cfg = cfg["dataset"]
         sub_cfg = cfg["sen2naipv2"]
+        # Kept so the expansion path can read cache_validation / expansion
+        # without threading cfg through every method.
+        self._sub_cfg = sub_cfg
 
         self.subset = str(sub_cfg["subset"])
         if self.subset not in KNOWN_SUBSETS:
@@ -118,6 +132,17 @@ class SEN2NAIPv2Dataset(SRPairDataset):
         self.lr_size = int(cfg["sr"]["lr_patch_size"])
         self.hr_size = int(cfg["sr"]["hr_patch_size"])
 
+        # The super-resolution factor HR must be over LR, exactly. Used by the
+        # per-pair cache validation, which refuses anything that is merely
+        # approximately 4x -- that would mean a resampling step crept in and the
+        # pair is no longer co-registered.
+        self.scale = int(cfg["sr"]["scale"])
+        # Recorded in every manifest line so a cache written under a different
+        # divisor is detectable rather than silently mixed in. Never used to
+        # clamp anything.
+        self.reflectance_scale = float(ds_cfg["reflectance_scale"])
+        self.cache_dtype = str(sub_cfg["cache_validation"]["expected_dtype"])
+
         self.band_indices = self._resolve_band_indices(self.BANDS)
 
         self.cache_dir = resolve_cache_dir(cfg) / self.subset
@@ -125,6 +150,7 @@ class SEN2NAIPv2Dataset(SRPairDataset):
         self.logger = get_logger("data.sen2naipv2", log_file=cfg["paths"]["log_file"])
 
         self._catalog: Optional[List[Dict[str, Any]]] = None
+        self._manifest_index: Optional[Dict[str, Dict[str, Any]]] = None
 
     # -- catalog -----------------------------------------------------------
 
@@ -252,16 +278,53 @@ class SEN2NAIPv2Dataset(SRPairDataset):
         )
 
     def is_cached(self, idx: int) -> bool:
-        """Whether sample ``idx`` is already on disk and readable."""
-        npz_path, json_path = self._cache_paths(self.catalog[idx]["sample_id"])
+        """Whether sample ``idx`` is cached, validated, and readable.
+
+        The manifest is consulted FIRST and is authoritative when it names the
+        sample: a manifest line exists only because the pair was written,
+        re-read, and validated, and the lookup is O(1). The old path opened and
+        decompressed the NPZ on every call, which the loader makes once per
+        sample per split -- minutes of CPU spent re-deciding a question already
+        answered on disk.
+
+        A sample absent from the manifest falls back to probing the files, so a
+        cache that predates the manifest (or a read-only Kaggle mount that ships
+        without one) still works unchanged. Run
+        ``scripts/prepare_data.py --backfill-manifest`` to adopt such a cache
+        once and get the fast path.
+
+        Args:
+            idx: Catalog index.
+
+        Returns:
+            True when both halves are present and usable.
+        """
+        sample_id = self.catalog[idx]["sample_id"]
+        npz_path, json_path = self._cache_paths(sample_id)
+
+        if sample_id in self.manifest_index:
+            # Trust the manifest, but not past the file having been deleted
+            # underneath it -- that is a stat(), not a decompression.
+            if npz_path.is_file():
+                return True
+            self.logger.warning(
+                "%s is in the manifest but %s is missing. Treating it as "
+                "uncached; re-run the cache expansion to refetch it.",
+                sample_id,
+                npz_path.name,
+            )
+            return False
+
         if not (npz_path.is_file() and json_path.is_file()):
             return False
         try:
             with np.load(npz_path) as handle:
                 return "lr" in handle and "hr" in handle
-        except (OSError, ValueError, EOFError):
+        except UNREADABLE_CACHE_ERRORS:
             # A truncated file from an interrupted download. Treat as absent so
             # the next prepare() rewrites it; do not raise, and do not use it.
+            # NOTE the tuple, not (OSError, ValueError, EOFError): a truncated
+            # NPZ raises zipfile.BadZipFile, which is neither.
             self.logger.warning("Discarding unreadable cache entry %s", npz_path)
             return False
 
@@ -424,6 +487,520 @@ class SEN2NAIPv2Dataset(SRPairDataset):
             self.cache_dir,
         )
         return counts
+
+    # -- manifest-driven cache expansion -----------------------------------
+    #
+    # Everything below exists to make a cache expansion *interruptible*. A run
+    # is bounded by a wall clock, can be killed at any instant, and must leave
+    # the cache in a state the next run resumes from without re-downloading
+    # anything. Three properties get that:
+    #
+    #   1. The manifest, not the directory listing, is the record of what is
+    #      cached. See src/data/cache_manifest.py for why.
+    #   2. A pair is written to temporary paths and os.replace'd into place only
+    #      after both halves are re-read from disk and validated, so a partially
+    #      written pair is never visible under its real name.
+    #   3. The manifest append is the commit. A kill between the replace and the
+    #      append leaves a complete, unrecorded pair, which the next run's
+    #      backfill adopts for free -- the failure mode is a re-validation, not
+    #      a re-download.
+
+    @property
+    def manifest_file(self) -> Path:
+        """Path to this subset's cache manifest. May not exist."""
+        return manifest_path(self.cache_dir)
+
+    @property
+    def manifest_index(self) -> Dict[str, Dict[str, Any]]:
+        """``taco_id -> manifest record`` for this cache, read once and kept.
+
+        Read lazily, so a dataset constructed only to answer questions about the
+        catalog never touches the manifest.
+        """
+        if self._manifest_index is None:
+            self._manifest_index = read_manifest(self.manifest_file)
+            self.logger.info(
+                "Cache manifest %s: %d pairs recorded.",
+                self.manifest_file,
+                len(self._manifest_index),
+            )
+        return self._manifest_index
+
+    def _dn_plausible_range(self):
+        """``(low, high)`` bounds for the DN-scaling check, from config."""
+        low, high = self._sub_cfg["cache_validation"]["dn_p999_range"]
+        return float(low), float(high)
+
+    def backfill_manifest(self) -> Dict[str, int]:
+        """Record pairs that are on disk but absent from the manifest.
+
+        This is what lets the manifest be adopted by a cache that predates it.
+        The 3002 pairs downloaded on Day 2 carry no manifest lines, and
+        re-downloading them to obtain some would cost nine hours for nothing.
+
+        Shapes and dtypes are read from each NPZ member's header WITHOUT
+        decompressing the arrays (see
+        :func:`~src.data.cache_manifest.npz_member_shape`).
+
+        MEASURED 2026-09-09: adopting the 3002-pair local cache took 231 s, not
+        the ~53 s the header reads alone cost. The difference is the per-record
+        ``fsync`` in :func:`~src.data.cache_manifest.append_record` -- roughly
+        60 ms per pair on this disk, and the dominant cost of a backfill. That
+        is a deliberate trade and it is kept: the fsync is what makes a manifest
+        line survive the process being killed the instant after it is written,
+        which is the entire basis of "a resumed run never re-downloads". Paying
+        it once per pair on a one-time adoption is cheap next to re-fetching a
+        pair at ~10 s over the network.
+
+        The consequence, stated plainly: a backfilled pair gets the STRUCTURAL
+        checks (4x scale, band count, dtype) but not the pixel-value ones
+        (all-zero, DN range), because those need the data. Backfilled records
+        carry ``"validated": "structural"`` and a null ``lr_dn_p999``,
+        distinguishing them from the ``"full"`` records newly fetched pairs get.
+        Anything failing even a structural check is left unrecorded and counted,
+        not deleted -- discarding a megabyte of possibly-fine download on the
+        strength of a header read is not a trade worth making.
+
+        Returns:
+            ``{"adopted", "already_recorded", "unreadable", "structural_reject"}``.
+        """
+        counts = {
+            "adopted": 0,
+            "already_recorded": 0,
+            "unreadable": 0,
+            "structural_reject": 0,
+        }
+        recorded = self.manifest_index
+        expected_bands = len(NATIVE_BANDS)
+
+        for npz_path in sorted(self.cache_dir.glob("*.npz")):
+            taco_id = npz_path.stem
+            if taco_id in recorded:
+                counts["already_recorded"] += 1
+                continue
+
+            try:
+                lr_shape, lr_dtype = npz_member_shape(npz_path, "lr")
+                hr_shape, hr_dtype = npz_member_shape(npz_path, "hr")
+            except UNREADABLE_CACHE_ERRORS as exc:
+                # A truncated or non-NPZ file. Not adopted, not deleted, and
+                # loudly counted -- is_cached() already treats it as absent, so
+                # the next expansion re-fetches it.
+                counts["unreadable"] += 1
+                self.logger.warning(
+                    "Not adopting %s into the manifest: %s: %s. It will be "
+                    "re-fetched.",
+                    npz_path.name,
+                    type(exc).__name__,
+                    exc,
+                )
+                continue
+
+            reason = self._structural_reject_reason(
+                lr_shape, hr_shape, lr_dtype, hr_dtype, expected_bands
+            )
+            if reason is not None:
+                counts["structural_reject"] += 1
+                self.logger.error(
+                    "Cached pair %s fails a structural check and was NOT added "
+                    "to the manifest: %s. It stays on disk; delete it by hand if "
+                    "it is genuinely bad.",
+                    npz_path.name,
+                    reason,
+                )
+                continue
+
+            record = make_record(
+                taco_id=taco_id,
+                lr_path=npz_path.name,
+                hr_path=npz_path.name,
+                lr_shape=lr_shape,
+                hr_shape=hr_shape,
+                bands=NATIVE_BANDS,
+                dtype=lr_dtype,
+                nodata_value=self.nodata_value,
+                reflectance_scale=self.reflectance_scale,
+                validated="structural",
+                lr_dn_p999=None,
+            )
+            append_record(self.manifest_file, record)
+            recorded[taco_id] = record
+            counts["adopted"] += 1
+
+        log = self.logger.error if counts["structural_reject"] else self.logger.info
+        log(
+            "Manifest backfill: %d adopted, %d already recorded, %d unreadable, "
+            "%d structurally rejected.",
+            counts["adopted"],
+            counts["already_recorded"],
+            counts["unreadable"],
+            counts["structural_reject"],
+        )
+        return counts
+
+    def _structural_reject_reason(
+        self,
+        lr_shape,
+        hr_shape,
+        lr_dtype: str,
+        hr_dtype: str,
+        expected_bands: int,
+    ) -> Optional[str]:
+        """The shape/dtype half of validation, decidable from headers alone.
+
+        Args:
+            lr_shape: ``(C, H, W)`` of the stored LR array.
+            hr_shape: ``(C, H*scale, W*scale)`` of the stored HR array.
+            lr_dtype: numpy dtype name of the stored LR array, e.g. ``uint16``.
+            hr_dtype: Likewise for HR.
+            expected_bands: Channel count both arrays must have.
+
+        Returns:
+            A human-readable reason, or None when every structural check passes.
+        """
+        if len(lr_shape) != 3 or len(hr_shape) != 3:
+            return f"expected (C, H, W); got LR {lr_shape}, HR {hr_shape}"
+        if lr_shape[0] != expected_bands or hr_shape[0] != expected_bands:
+            return (
+                f"expected {expected_bands} bands; got LR {lr_shape[0]}, "
+                f"HR {hr_shape[0]}"
+            )
+        if (
+            hr_shape[1] != lr_shape[1] * self.scale
+            or hr_shape[2] != lr_shape[2] * self.scale
+        ):
+            return (
+                f"HR {hr_shape[1]}x{hr_shape[2]} is not exactly {self.scale}x LR "
+                f"{lr_shape[1]}x{lr_shape[2]}"
+            )
+        if lr_dtype != self.cache_dtype or hr_dtype != self.cache_dtype:
+            return (
+                f"expected {self.cache_dtype} on disk; got LR {lr_dtype}, "
+                f"HR {hr_dtype}"
+            )
+        return None
+
+    def _fetch_pair_arrays(self, idx: int):
+        """Download one pair's LR and HR arrays and their raster profiles.
+
+        Network and GDAL access happen here. Nothing is written.
+
+        Args:
+            idx: Catalog index.
+
+        Returns:
+            ``(arrays, profile)``. ``arrays`` maps ``"lr"``/``"hr"`` to a
+            ``(C, H, W)`` ``uint16`` array of raw digital numbers -- NOT
+            reflectance, and not band-subset. ``profile`` maps the same keys to
+            the source CRS, transform, nodata, dtype and shape.
+
+        Raises:
+            ImportError: rasterio is not installed.
+            RuntimeError: The nested record did not contain both an ``lr`` and an
+                ``hr`` row.
+        """
+        try:
+            import rasterio as rio
+        except ImportError as exc:
+            raise ImportError(
+                "rasterio is required to read SEN2NAIPv2 GeoTIFFs. "
+                "pip install rasterio."
+            ) from exc
+
+        entry = self.catalog[idx]
+        sub = self._frame.read(entry["row_position"])
+        hrefs = {}
+        for position in range(len(sub)):
+            row = sub.iloc[position]
+            hrefs[str(row["tortilla:id"]).lower()] = sub.read(position)
+
+        missing = {"lr", "hr"} - set(hrefs)
+        if missing:
+            raise RuntimeError(
+                f"Record {entry['sample_id']!r} is missing {sorted(missing)}; "
+                f"nested ids were {sorted(hrefs)}. The record layout is not what "
+                "this loader was written against."
+            )
+
+        arrays, profile = {}, {}
+        for key in ("lr", "hr"):
+            with rio.open(hrefs[key]) as src:
+                arrays[key] = src.read()  # (C, H, W), uint16
+                profile[key] = {
+                    "crs": str(src.crs) if src.crs else None,
+                    "transform": tuple(src.transform)[:6],
+                    "nodata": src.nodata,
+                    "dtype": str(src.dtypes[0]),
+                    "shape": [int(d) for d in arrays[key].shape],
+                }
+        return arrays, profile
+
+    def fetch_and_commit(self, idx: int) -> Dict[str, Any]:
+        """Fetch, validate, and atomically commit one pair. Returns its record.
+
+        The ordering is the whole point:
+
+        1. Download both halves into memory.
+        2. Write them to ``<stem>.npz.tmp`` and the sidecar to
+           ``<stem>.json.tmp``.
+        3. Re-read the NPZ FROM DISK and validate what was actually written --
+           not the in-memory arrays, which would not catch a truncated or
+           mis-encoded write.
+        4. ``os.replace`` both temporaries into place. A same-directory rename is
+           atomic on Windows and POSIX alike.
+        5. Append the manifest record. THIS is the commit.
+
+        A failure at any step removes the temporaries and leaves nothing under
+        the real names, so the pair reads as uncached and is retried next run.
+
+        Args:
+            idx: Catalog index.
+
+        Returns:
+            The manifest record that was appended.
+
+        Raises:
+            CacheValidationError: The pair failed a per-pair invariant. The
+                caller tallies it by ``.reason``.
+            Exception: Whatever the download itself raised, unchanged.
+        """
+        entry = self.catalog[idx]
+        taco_id = entry["sample_id"]
+        npz_path, json_path = self._cache_paths(taco_id)
+        tmp_npz = npz_path.with_name(npz_path.name + ".tmp")
+        tmp_json = json_path.with_name(json_path.name + ".tmp")
+
+        try:
+            arrays, profile = self._fetch_pair_arrays(idx)
+
+            # np.savez_compressed appends ".npz" to a *path* that lacks it,
+            # which would write past the temporary name. An open handle is not
+            # given that treatment.
+            with tmp_npz.open("wb") as handle:
+                np.savez_compressed(handle, lr=arrays["lr"], hr=arrays["hr"])
+
+            sidecar = dict(entry)
+            sidecar["profile"] = profile
+            tmp_json.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+
+            # Validate what is ON DISK, not what was in memory.
+            with np.load(tmp_npz) as handle:
+                stats = validate_pair(
+                    handle["lr"],
+                    handle["hr"],
+                    scale=self.scale,
+                    expected_bands=len(NATIVE_BANDS),
+                    expected_dtype=self.cache_dtype,
+                    nodata_value=self.nodata_value,
+                    dn_plausible_range=self._dn_plausible_range(),
+                    taco_id=taco_id,
+                )
+
+            os.replace(tmp_npz, npz_path)
+            os.replace(tmp_json, json_path)
+        except BaseException:
+            # Remove the half-written temporaries, then let the error through
+            # untouched. Nothing is swallowed here: the bare re-raise is what
+            # makes this a cleanup rather than exception handling.
+            for path in (tmp_npz, tmp_json):
+                if path.exists():
+                    path.unlink()
+            raise
+
+        record = make_record(
+            taco_id=taco_id,
+            lr_path=npz_path.name,
+            hr_path=npz_path.name,
+            lr_shape=stats["lr_shape"],
+            hr_shape=stats["hr_shape"],
+            bands=NATIVE_BANDS,
+            dtype=stats["dtype"],
+            nodata_value=self.nodata_value,
+            reflectance_scale=self.reflectance_scale,
+            validated="full",
+            lr_dn_p999=stats["lr_dn_p999"],
+            nodata_fraction=stats["nodata_fraction"],
+        )
+        append_record(self.manifest_file, record)
+        self.manifest_index[taco_id] = record
+        return record
+
+    def expand_cache(
+        self,
+        target_pairs: Optional[int] = None,
+        time_budget_sec: Optional[float] = None,
+        progress_every: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Add pairs to the cache under a hard wall clock. Resumable, atomic.
+
+        The budget is checked at the TOP of every pair's iteration, so the pair
+        in flight always finishes, is validated, and is committed before the loop
+        exits. Expiry is a normal, successful ending: a partial cache is a
+        smaller training set, not a broken one, and the caller returns 0.
+
+        Args:
+            target_pairs: Stop once the cache holds this many pairs IN TOTAL
+                (existing plus new), not this many new ones. None means "as many
+                as the catalog offers". The distinction matters on a resumed
+                run: "get to 4000" is idempotent, "fetch 1000 more" is not.
+            time_budget_sec: Wall-clock seconds the expansion may run. None
+                disables the bound. The clock starts on entry and covers the
+                manifest backfill and the catalog load, so slow setup eats the
+                budget rather than silently extending it.
+            progress_every: Emit a progress line every N newly committed pairs.
+                None reads ``cfg.sen2naipv2.expansion.progress_every``.
+
+        Returns:
+            ``before`` (pairs in the manifest at entry, after backfill),
+            ``after``, ``new`` (committed this run), ``rejects`` (reason ->
+            count), ``elapsed_s``, ``stopped_because`` (``"target"``,
+            ``"time_budget"``, or ``"catalog_exhausted"``),
+            ``rate_pairs_per_s``, ``projected_total_at_rate``, ``backfill``,
+            ``catalog_size``, ``manifest``.
+
+        Raises:
+            RuntimeError: The catalog could not be loaded. An expansion with no
+                catalog has nothing to do and must not report success.
+        """
+        started = time.monotonic()
+        if progress_every is None:
+            progress_every = int(self._sub_cfg["expansion"]["progress_every"])
+        progress_every = max(1, int(progress_every))
+
+        # Adopt whatever is already on disk before deciding what to fetch. This
+        # is the "never re-download what is on disk" guarantee.
+        backfill = self.backfill_manifest()
+        recorded = self.manifest_index
+        before = len(recorded)
+
+        catalog = self.catalog  # network access; inside the budget by design
+        rejects: Dict[str, int] = {}
+        new = 0
+        stopped_because = "catalog_exhausted"
+
+        self.logger.info(
+            "Expanding cache: %d pairs recorded, catalog offers %d, target=%s, "
+            "budget=%ss.",
+            before,
+            len(catalog),
+            target_pairs,
+            time_budget_sec,
+        )
+        print(
+            f"[expand] start: {before} pairs cached, {len(catalog)} in catalog, "
+            f"target={target_pairs}, budget={time_budget_sec}s",
+            flush=True,
+        )
+
+        for idx, entry in enumerate(catalog):
+            # --- the wall clock, checked BEFORE any work on this pair ---
+            if time_budget_sec is not None:
+                if time.monotonic() - started >= float(time_budget_sec):
+                    stopped_because = "time_budget"
+                    self.logger.info(
+                        "Time budget of %.0fs expired after %d new pairs. "
+                        "Exiting cleanly -- a partial cache is a valid outcome.",
+                        float(time_budget_sec),
+                        new,
+                    )
+                    break
+
+            if target_pairs is not None and before + new >= int(target_pairs):
+                stopped_because = "target"
+                self.logger.info("Reached the target of %d pairs.", int(target_pairs))
+                break
+
+            taco_id = entry["sample_id"]
+            if taco_id in recorded:
+                continue
+
+            try:
+                self.fetch_and_commit(idx)
+            except CacheValidationError as exc:
+                rejects[exc.reason] = rejects.get(exc.reason, 0) + 1
+                self.logger.error("REJECTED %s: %s", taco_id, exc.message)
+                continue
+            except Exception as exc:  # noqa: BLE001 - counted, logged, reported
+                # Bounded and visible, on the same terms as _fetch_with_retry:
+                # one unreachable record must not end a time-boxed run, but it
+                # is tallied under "fetch_failed", logged at ERROR, and printed
+                # in the summary. Nothing here is silent.
+                rejects["fetch_failed"] = rejects.get("fetch_failed", 0) + 1
+                self.logger.error(
+                    "FETCH FAILED %s: %s: %s", taco_id, type(exc).__name__, exc
+                )
+                continue
+
+            new += 1
+            if new % progress_every == 0:
+                elapsed = time.monotonic() - started
+                rate = new / elapsed if elapsed > 0 else 0.0
+                projected = self._project_total(
+                    before, new, rate, time_budget_sec, elapsed, target_pairs
+                )
+                print(
+                    f"[expand] {before + new} cached (+{new} new)  "
+                    f"elapsed {elapsed:7.1f}s  {rate:6.3f} pairs/s  "
+                    f"projected total {projected}",
+                    flush=True,
+                )
+
+            if self.request_delay_s:
+                time.sleep(self.request_delay_s)
+
+        elapsed = time.monotonic() - started
+        rate = new / elapsed if elapsed > 0 and new else 0.0
+        summary = {
+            "before": before,
+            "after": before + new,
+            "new": new,
+            "rejects": rejects,
+            "elapsed_s": elapsed,
+            "stopped_because": stopped_because,
+            "rate_pairs_per_s": rate,
+            "projected_total_at_rate": self._project_total(
+                before, new, rate, time_budget_sec, elapsed, target_pairs
+            ),
+            "backfill": backfill,
+            "catalog_size": len(catalog),
+            "manifest": str(self.manifest_file),
+        }
+        self.logger.info("Cache expansion summary: %s", summary)
+        return summary
+
+    @staticmethod
+    def _project_total(
+        before: int,
+        new: int,
+        rate: float,
+        time_budget_sec: Optional[float],
+        elapsed: float,
+        target_pairs: Optional[int],
+    ):
+        """Pairs the cache will hold when the budget runs out, at the rate so far.
+
+        Args:
+            before: Pairs cached at the start of the run.
+            new: Pairs committed so far.
+            rate: Pairs per second measured over ``elapsed``.
+            time_budget_sec: The budget in seconds, or None for unbounded.
+            elapsed: Seconds spent so far.
+            target_pairs: The total-pairs ceiling, or None.
+
+        Returns:
+            An int projection, or the string ``"unbounded"`` when there is no
+            budget to project against. Capped at ``target_pairs`` when one is
+            set, since the run stops there.
+        """
+        if time_budget_sec is None:
+            return "unbounded"
+        if rate <= 0:
+            return before + new
+        left = max(0.0, float(time_budget_sec) - elapsed)
+        projected = before + new + int(rate * left)
+        if target_pairs is not None:
+            projected = min(projected, int(target_pairs))
+        return projected
 
     # -- sample loading ----------------------------------------------------
 

@@ -182,7 +182,25 @@ sen2naipv2:
   # histmatch use synthetic LR), and it is a single .taco file rather than a
   # multipart set, which makes caching simpler and resumption cheaper.
   subset: sen2naipv2-crosssensor
-  num_samples: 3000
+  # RAISED FROM 3000 TO 4409 on 2026-09-09 (Day 3 cache expansion).
+  #
+  # 4409 is not a preference, it is the ceiling: it is exactly how many of the
+  # 8000 crosssensor rows survive min_correlation >= 0.9 below. Asking for more
+  # gets a warning and 4409 anyway.
+  #
+  # WHY THIS IS SAFE FOR RUN A. The catalog is `frame.head(num_samples)` over a
+  # deterministically filtered frame, so head(4409) has the same first 3000 rows
+  # in the same order as head(3000). No existing sample id, index, or split
+  # assignment moves. The split file was EXTENDED, not recut
+  # (scripts/make_splits.py --extend), so val and test are the same 300 ids each
+  # that Day 1's bicubic floor and Run A were measured on -- asserted id by id,
+  # not assumed.
+  #
+  # cfg.loader.cached_only is true, so the catalog entries that are not yet
+  # downloaded are skipped with a logged count rather than fetched mid-epoch.
+  # Raising this number therefore makes newly cached pairs VISIBLE; it does not
+  # make training wait on a download.
+  num_samples: 4409
 
   # Filter on the per-pair LR/HR correlation carried in the taco metadata.
   # MEASURED over all 8000 crosssensor rows: min=0.866, p05=0.869, median=0.904,
@@ -211,6 +229,44 @@ sen2naipv2:
   # Optional politeness delay between fetches, in seconds. 0 disables it. Raise
   # this if throttling persists despite retries.
   request_delay_s: 0.0
+
+  # Per-pair validation applied BEFORE a fetched pair is committed to the cache.
+  # See src/data/cache_manifest.py::validate_pair. A pair failing any of these
+  # is refused whole and tallied by reason; it is never repaired, clipped, or
+  # partially written.
+  cache_validation:
+    # The dtype every cached pair must be stored as. The cache holds RAW DIGITAL
+    # NUMBERS, losslessly, so that a corrected reflectance divisor or nodata
+    # value does not invalidate gigabytes of download. A float array arriving
+    # here means something already applied the divisor and the pair would be
+    # divided twice; the check exists to catch exactly that.
+    expected_dtype: uint16
+
+    # Bounds on the 99.9th percentile of VALID (non-nodata) LR digital numbers.
+    # This is the reflectance-scaling check: every cached pair must live in the
+    # same DN domain, so that dividing by dataset.reflectance_scale gives
+    # reflectance for all of them rather than for most of them.
+    #
+    # MEASURED 2026-09-09 over a seeded 300-pair sample of the 3002-pair Day 2
+    # cache: p99.9 of valid LR DN ran 2152 to 8303, median 4156, p99 7275.
+    # The bounds below widen that observed span by more than an order of
+    # magnitude on each side ON PURPOSE. They exist to catch a pair delivered
+    # under a DIFFERENT quantification value -- which lands 10-100x outside --
+    # not to filter bright scenes. Snow, cloud and specular water sit at the top
+    # of the observed range and must pass.
+    #
+    # NOTE the upper bound is far above dataset.reflectance_scale (10000): DN
+    # 40000 is reflectance 4.0. That is deliberately permissive. This is a
+    # scaling check, not a brightness filter, and the project does not clip
+    # bright targets.
+    dn_p999_range: [50.0, 40000.0]
+
+  # Wall-clock-bounded cache expansion. Defaults are null so the ordinary
+  # prepare() path is unchanged; scripts/prepare_data.py sets them from
+  # --target-pairs / --time-budget-sec.
+  expansion:
+    # Progress line cadence, in newly committed pairs.
+    progress_every: 25
 
 worldstrat:
   # UNVERIFIED LAYOUT. The Kaggle mount was not available when this was written,
