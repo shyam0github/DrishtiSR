@@ -762,8 +762,47 @@ degradation_audit:
 smoke:
   dataset:
     name: synthetic_stub
+  delhi:
+    # --smoke MUST NOT touch the network (see the note above this block), and a
+    # download script has no offline half worth rehearsing on its own. So smoke
+    # runs the whole write path -- band ordering from dataset.bands, the
+    # WGS84 -> native-UTM bbox transform, the uint16 stack, the GeoTIFF profile,
+    # the statistics and the manifest schema -- against a raster fabricated in
+    # memory, and skips ONLY the STAC search and the HTTP read. It proves the
+    # plumbing; it cannot prove the imagery.
+    #
+    # UTM 43N, which is the zone Delhi actually falls in, so the smoke fixture
+    # exercises a realistic projected transform rather than a toy one.
+    smoke_crs: EPSG:32643
+    smoke_size_px: 128
+    # Separate names so a --smoke run can never overwrite a real scene or, worse,
+    # leave a manifest of fabricated pixels sitting where the real one belongs.
+    filename_template: "delhi_{name}_{date}_smoke.tif"
+    manifest_name: manifest_smoke.json
   synthetic_stub:
     num_samples: 12
+  validate_sr:
+    # Smoke validates the FABRICATED pair that smoke_view writes, so the two
+    # smoke paths compose: run smoke_view --smoke, then validate_sr --smoke,
+    # and the validator has something real to read. Its verdict describes
+    # invented imagery and means nothing beyond "the checks execute".
+    input: outputs/smoke/delhi_smoke_lr.tif
+    sr: outputs/smoke/delhi_smoke_sr.tif
+  smoke_view:
+    # There is no Delhi raster and no SR output in a clean checkout, and
+    # --smoke must not touch the network. So smoke FABRICATES an LR/SR GeoTIFF
+    # pair -- real files, written and read back through rasterio with a real
+    # UTM transform -- and then runs the identical figure code over them. The
+    # crop search, the shared stretch, the band-name resolution and both
+    # figures are all exercised; only the imagery is invented.
+    fabricate: true
+    fabricate_size_lr_px: 96
+    crop_lr_px: 32
+    overview_long_edge_px: 240
+    input: outputs/smoke/delhi_smoke_lr.tif
+    sr: outputs/smoke/delhi_smoke_sr.tif
+    out_crop: outputs/figures/day2_smoke_smoke.png
+    out_full: outputs/figures/day2_smoke_full_smoke.png
   eval_runA:
     # There is no trained checkpoint for the synthetic stub, and inventing one
     # in code would leave the checkpoint-loading path -- the part most likely to
@@ -1014,6 +1053,94 @@ runtime:
   num_threads: 6
   max_parameters: 1000000
 
+# Real Sentinel-2 L2A scenes over Delhi NCR, pulled from Microsoft Planetary
+# Computer by scripts/fetch_delhi.py. These are INFERENCE/demo targets, not
+# training data -- the model trains on SEN2NAIPv2 pairs and is then shown a
+# scene from the actual deployment geography.
+#
+# BAND ORDER IS NOT SPECIFIED HERE ON PURPOSE. The stack order is read from
+# `dataset.bands` (B04, B03, B02, B08 -- red, green, blue, NIR), so a scene
+# fetched here cannot disagree with the channel axis the network was trained on.
+# Duplicating the list in this block is exactly how the two drift apart.
+delhi:
+  stac_endpoint: https://planetarycomputer.microsoft.com/api/stac/v1
+  collection: sentinel-2-l2a
+
+  # Post-monsoon into late winter. The monsoon (Jun-Sep) leaves near-permanent
+  # cloud over the NCR, and pre-monsoon May-Jun is dust-hazed; this window is
+  # when the Gangetic plain is actually visible from orbit. Note it still
+  # contains the Nov-Jan smog season, which is aerosol rather than cloud and so
+  # is NOT caught by eo:cloud_cover -- inspect the chips, do not trust the flag.
+  datetime_start: "2024-10-01"
+  datetime_end: "2025-03-31"
+
+  # STRICT. 5% cloud over a whole 110 km MGRS tile still permits a cloud sitting
+  # on the AOI, which is why the best item is chosen by ascending cloud cover
+  # rather than by taking the first that passes.
+  max_cloud_cover: 5.0
+  max_items: 200
+
+  # Two AOIs, deliberately different land cover, so a super-resolution result is
+  # not judged on one texture. WGS84 lon/lat, [west, south, east, north].
+  aois:
+    - name: A
+      description: Central Delhi -- dense continuous urban fabric.
+      bbox: [77.15, 28.55, 77.28, 28.66]
+    - name: B
+      description: Gurugram edge -- mixed urban, peri-urban and agriculture.
+      bbox: [77.05, 28.38, 77.18, 28.49]
+
+  # Gitignored (see .gitignore): these are imagery, and the manifest records
+  # exactly which STAC items they came from so the fetch is reproducible
+  # without versioning the pixels.
+  output_dir: data/delhi
+  manifest_name: manifest.json
+  filename_template: "delhi_{name}_{date}.tif"
+  filename_date_format: "%Y%m%d"
+
+  # GeoTIFF creation. Deflate rather than JPEG: these are uint16 L2A digital
+  # numbers feeding a reflectance-domain model, and lossy compression would
+  # corrupt the radiometry the spectral-consistency objective depends on.
+  tiled: true
+  blocksize: 512
+  compress: deflate
+
+  # GDAL /vsicurl tuning for reading COGs over HTTPS. Without
+  # GDAL_DISABLE_READDIR_ON_OPEN the driver lists the whole blob container
+  # before every open, which turns a windowed read into minutes of stalling.
+  gdal_env:
+    GDAL_DISABLE_READDIR_ON_OPEN: EMPTY_DIR
+    GDAL_HTTP_MAX_RETRY: "5"
+    GDAL_HTTP_RETRY_DELAY: "2"
+    CPL_VSIL_CURL_ALLOWED_EXTENSIONS: ".tif"
+
+  # Sanity bounds on the written pixels, in RAW L2A DIGITAL NUMBERS (divide by
+  # dataset.reflectance_scale for reflectance). Checked and REPORTED, never
+  # applied as a clip -- bright roofs and specular water legitimately run high,
+  # and silently clamping them would destroy the very radiometry this scene is
+  # being fetched to test. A violation is logged as a warning, not a crash.
+  expect_dn_min: 0
+  expect_dn_max: 12000
+
+  # BOA_ADD_OFFSET, and why it needs a fallback at all.
+  #
+  # MEASURED 2026-09-07 against item
+  # S2A_MSIL2A_20241030T052941_R105_T43RGM_20241030T093050 (baseline 05.11):
+  # Planetary Computer's sentinel-2-l2a items expose the offset NOWHERE. There
+  # is no `s2:boa_add_offset` property, and the assets carry no `raster:bands`
+  # block -- only proj:*, gsd and eo:bands. So reading it from the item returns
+  # nothing, even though the underlying ESA product certainly has one.
+  #
+  # Recording "no offset" there would be the worst outcome: reflectance would
+  # come out 0.1 too high everywhere, which over water, asphalt and shadow --
+  # most of an urban scene -- is a large fractional error, and it would look
+  # like a plausible number rather than a missing one. So when the item is
+  # silent, the offset is DERIVED from the processing baseline, and the
+  # manifest records which of the two it was. ESA introduced the -1000 offset
+  # at baseline 04.00 (2022-01-25); anything earlier genuinely has none.
+  boa_offset_baseline_threshold: "04.00"
+  boa_offset_dn: -1000.0
+
 # Run A evaluation: the trained EDSR-baseline checkpoint against the bicubic
 # floor, read by scripts/eval_runA.py.
 #
@@ -1116,3 +1243,83 @@ huggingface:
     Run A: EDSR-baseline x4 for Sentinel-2 10 m -> 2.5 m, 4-band RGBN.
     L1 only, 40k iterations. Beats bicubic on PSNR, SSIM and LPIPS over the
     full 1199-patch validation split.
+
+# ---------------------------------------------------------------------------
+# scripts/validate_sr.py -- does the SR GeoTIFF survive contact with rasterio?
+#
+# Every bound here is a REFERENCE to a value that already exists elsewhere in
+# this file, not a new number. The expected pixel size is dataset.hr_gsd_m, the
+# DN bounds are delhi.expect_dn_min/max. A validator that carried its own copy
+# of the truth would keep passing after the config it is meant to guard had
+# changed underneath it.
+validate_sr:
+  input: data/delhi/delhi_A_20241030.tif
+  sr: outputs/delhi_A_sr.tif
+  scale: 4
+
+  # Origin must be BIT-IDENTICAL, not merely close: the SR raster keeps the
+  # input's top-left corner and only divides the pixel size. Tolerance is in
+  # CRS units (metres for UTM) and exists for float round-trip through the
+  # GeoTIFF header, not for genuine drift.
+  origin_tol_m: 1.0e-6
+  pixel_size_tol_m: 1.0e-6
+
+  # Saturation at the storage ceiling is reported separately from the range
+  # check. uint16 CANNOT hold a NaN, so "no NaN" is trivially true there and
+  # would be a vacuous pass; the meaningful failure for an integer raster is
+  # pixels pinned at 0 or 65535 by the write, which is what gets counted.
+  saturation_frac_max: 0.001
+
+# ---------------------------------------------------------------------------
+# scripts/smoke_view.py -- the Day 2 eyeball test.
+#
+# This block configures a FIGURE, not a measurement. Nothing here may reach a
+# loss or a metric; the percentile stretch below exists so a human can see
+# reflectance on a screen, and applying it to data would be exactly the silent
+# clipping the spectral-consistency contribution forbids.
+smoke_view:
+  # The scene to render and the SR raster to render against it. Both are
+  # gitignored imagery; smoke mode fabricates its own pair instead.
+  input: data/delhi/delhi_A_20241030.tif
+  sr: outputs/delhi_A_sr.tif
+
+  crop_lr_px: 256
+  scale: 4
+
+  # Bands composited into the RGB panels, resolved BY NAME against
+  # dataset.bands rather than by position. delhi_*.tif is written R,G,B,NIR,
+  # so a positional [0,1,2] happens to be right today and would silently
+  # render false colour the day the band order changes.
+  display_rgb_bands: [B04, B03, B02]
+
+  # ONE stretch, computed once, applied to all three panels. A per-panel
+  # stretch is how a super-resolution figure lies: it hands the blurriest
+  # panel its own contrast boost and the comparison stops meaning anything.
+  # Computed from the LR crop -- the common ancestor of all three panels, so
+  # no panel gets a stretch fitted to itself.
+  display_percentiles: [2.0, 98.0]
+
+  # Where the built-up crop goes. null searches for one (see
+  # select_builtup_crop); [x, y] in LR pixels pins it, which is what a report
+  # should do once a crop has been chosen and discussed.
+  crop_xy: null
+
+  # Built-up search. Candidate windows are scored on low NDVI (built surfaces
+  # are not vegetated) and high brightness variance (streets and roofs have
+  # structure; bare fields and water do not). Both terms are needed: NDVI
+  # alone picks water, variance alone picks field boundaries.
+  search_stride_lr_px: 32
+  # Fraction of the scene edge excluded from the search, so the chosen crop is
+  # never a tile-border special case masquerading as a typical result.
+  search_margin_frac: 0.05
+  ndvi_weight: 1.0
+  variance_weight: 1.0
+
+  # Full-scene overview: the long edge is decimated to this many pixels. The
+  # point of the overview is tile seams and global colour shift, both of which
+  # survive decimation; per-pixel sharpness does not and is not claimed.
+  overview_long_edge_px: 900
+
+  figure_dpi: 140
+  out_crop: outputs/day2_smoke.png
+  out_full: outputs/day2_smoke_full.png

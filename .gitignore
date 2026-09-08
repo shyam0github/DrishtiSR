@@ -53,3 +53,9 @@ outputs/**
 # 2026-09-06. Generated notebooks land here too and are build artefacts.
 outputs/kaggle/
 outputs/kaggle_kernels/
+
+# Real Sentinel-2 scenes over Delhi NCR, fetched by scripts/fetch_delhi.py.
+# Imagery plus its manifest. The *.tif rule at the top of this file already
+# covers the rasters; this rule also covers manifest.json, which names the exact
+# STAC items and so makes the directory reproducible without versioning pixels.
+data/delhi/

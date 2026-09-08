@@ -4,7 +4,8 @@ Handles rasters far larger than GPU memory: overlapping tiles, raised-cosine
 (Hann) blend weights, weight-normalised accumulation -> no seams. Output keeps
 CRS and gets an affine with pixel size divided by `scale`.
 
-Place at: src/drishtisr/infer/tiled.py
+Lives at src/infer/tiled.py; importable as either ``src.infer.tiled`` or
+``drishtisr.infer.tiled`` (see the ``drishtisr`` alias package).
 
 CLI:
     python -m drishtisr.infer.tiled --ckpt runs/runA/best.pt \
@@ -13,6 +14,7 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import contextlib
 from pathlib import Path
 
 import numpy as np
@@ -20,24 +22,55 @@ import torch
 
 try:
     from drishtisr.models.edsr import build_model
+    from drishtisr.utils.logging import get_logger
 except ImportError:
-    from edsr import build_model  # type: ignore
+    from src.models.edsr import build_model  # type: ignore
+    from src.utils.logging import get_logger  # type: ignore
+
+LOGGER = get_logger("drishtisr.infer.tiled")
 
 
 # ---------------------------------------------------------------- windows
-def hann_1d(n: int, ramp: int) -> np.ndarray:
-    """1 in the middle, raised-cosine ramp of `ramp` px at each end."""
+def hann_1d(n: int, ramp: int, lo: bool = True, hi: bool = True) -> np.ndarray:
+    """1 in the middle, raised-cosine ramp of `ramp` px at each end.
+
+    `lo` / `hi` select which end is ramped. A ramp is only correct where a
+    NEIGHBOURING tile supplies the complementary weight; against the image
+    border nothing else contributes, so tapering there would divide an almost
+    zero numerator by an almost zero accumulator and destroy the border
+    pixels. Callers pass `lo=False` / `hi=False` for edges that sit on the
+    raster boundary.
+
+    Returns float32 [n], values in [0, 1].
+    """
     w = np.ones(n, dtype=np.float32)
     if ramp > 0:
         r = np.arange(ramp, dtype=np.float32)
         edge = 0.5 * (1.0 - np.cos(np.pi * (r + 0.5) / ramp))
-        w[:ramp] = edge
-        w[n - ramp:] = edge[::-1]
+        if lo:
+            w[:ramp] = edge
+        if hi:
+            w[n - ramp:] = edge[::-1]
     return w
 
 
-def blend_window(h: int, w: int, ramp: int) -> np.ndarray:
-    return np.outer(hann_1d(h, ramp), hann_1d(w, ramp)).astype(np.float32)
+def blend_window(
+    h: int,
+    w: int,
+    ramp: int,
+    top: bool = True,
+    bottom: bool = True,
+    left: bool = True,
+    right: bool = True,
+) -> np.ndarray:
+    """Separable Hann blend weights, float32 [h, w] (H, W axis order), in [0, 1].
+
+    The four flags disable the ramp on edges that coincide with the raster
+    border; see `hann_1d`.
+    """
+    return np.outer(
+        hann_1d(h, ramp, top, bottom), hann_1d(w, ramp, left, right)
+    ).astype(np.float32)
 
 
 # ---------------------------------------------------------------- core
@@ -51,7 +84,22 @@ def sr_array(
     device: str = "cuda",
     amp: bool = True,
 ) -> np.ndarray:
-    """lr: float32 [C,H,W] in ~[0,1] -> float32 [C,H*scale,W*scale]."""
+    """Run `model` over overlapping tiles and blend them into one raster.
+
+    lr: surface reflectance, float32 [C, H, W] (channel-first), nominally
+        [0, 1] but UNCLIPPED -- cloud, snow and bright roofs exceed 1.0.
+    returns: surface reflectance, float32 [C, H*scale, W*scale], same
+        unclipped convention. Values are never clamped here; the model's own
+        output range is passed through so spectral consistency can be checked
+        downstream.
+
+    Tiles are accumulated with Hann weights and divided by the accumulated
+    weight, so an interior pixel is a convex combination of every tile that
+    covers it. `ramp` spans the FULL overlap, which makes the two facing
+    ramps sum to exactly 1 and keeps each tile's own edge pixels -- where a
+    convolutional or interpolating model sees padded rather than real
+    context -- at near-zero weight wherever a neighbour has real context.
+    """
     c, h, w = lr.shape
     step = tile - overlap
     out = np.zeros((c, h * scale, w * scale), dtype=np.float32)
@@ -70,11 +118,18 @@ def sr_array(
             if pad_h or pad_w:
                 patch = np.pad(patch, ((0, 0), (0, pad_h), (0, pad_w)), mode="reflect")
             t = torch.from_numpy(patch).unsqueeze(0).to(device)
-            with torch.cuda.amp.autocast(enabled=amp and device == "cuda"):
+            use_amp = amp and str(device).startswith("cuda")
+            ctx = torch.autocast("cuda") if use_amp else contextlib.nullcontext()
+            with ctx:
                 sr = model(t)
-            sr = sr.float().squeeze(0).clamp(0, 1).cpu().numpy()
+            # No clamp: reflectance above 1.0 is physical, not an error.
+            sr = sr.float().squeeze(0).cpu().numpy()
             sr = sr[:, : ph * scale, : pw * scale]
-            win = blend_window(ph * scale, pw * scale, overlap * scale // 2)
+            win = blend_window(
+                ph * scale, pw * scale, overlap * scale,
+                top=y0 > 0, bottom=y0 + ph < h,
+                left=x0 > 0, right=x0 + pw < w,
+            )
             Y, X = y0 * scale, x0 * scale
             out[:, Y:Y + ph * scale, X:X + pw * scale] += sr * win
             acc[:, Y:Y + ph * scale, X:X + pw * scale] += win
@@ -96,6 +151,20 @@ def run_file(
     out_dtype: str = "uint16",
     bands: list[int] | None = None,
 ) -> dict:
+    """Super-resolve a GeoTIFF on disk, preserving its georeferencing.
+
+    Reads uint16 digital numbers, divides by `reflect_div` to get surface
+    reflectance (float32 [C, H, W], nominally [0, 1], unclipped), runs
+    `sr_array`, and writes the result back.
+
+    The output keeps the source CRS and top-left origin exactly; only the
+    pixel size is divided by `scale` (10 m -> 2.5 m at scale=4).
+
+    With `out_dtype="uint16"` the reflectance is scaled back by `reflect_div`
+    and clipped to [0, 65535]. That clip is a property of the storage dtype,
+    not of the model: it is the only clip in this path, and `out_dtype`
+    ="float32" avoids it entirely when unclipped reflectance must survive.
+    """
     import rasterio
     from rasterio.transform import Affine
 
@@ -108,12 +177,22 @@ def run_file(
     sr = sr_array(arr, model, scale, tile, overlap, device, amp)
 
     if out_dtype == "uint16":
-        data = np.clip(sr * reflect_div, 0, 65535).astype(np.uint16)
-    else:
+        dn = sr * reflect_div
+        n_clipped = int(np.count_nonzero((dn < 0) | (dn > 65535)))
+        if n_clipped:
+            LOGGER.warning(
+                "uint16 output clipped %d of %d samples outside [0, 65535] "
+                "(reflectance [%.4f, %.4f]); use --out-dtype float32 to keep them",
+                n_clipped, dn.size, float(sr.min()), float(sr.max()),
+            )
+        data = np.clip(dn, 0, 65535).astype(np.uint16)
+    elif out_dtype == "float32":
         data = sr.astype(np.float32)
+    else:
+        raise ValueError(f"unsupported out_dtype {out_dtype!r}; use uint16 or float32")
 
     # 10 m -> 2.5 m: same origin, pixel size / scale
-    new_tf = transform * Affine.scale(1.0 / scale, 1.0 / scale)
+    new_tf = transform @ Affine.scale(1.0 / scale, 1.0 / scale)
     prof.update(driver="GTiff", height=data.shape[1], width=data.shape[2], count=data.shape[0],
                 dtype=data.dtype, transform=new_tf, crs=crs, compress="deflate",
                 predictor=2, tiled=True, blockxsize=512, blockysize=512, BIGTIFF="IF_SAFER")
