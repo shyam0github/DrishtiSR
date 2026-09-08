@@ -803,6 +803,33 @@ smoke:
     sr: outputs/smoke/delhi_smoke_sr.tif
     out_crop: outputs/figures/day2_smoke_smoke.png
     out_full: outputs/figures/day2_smoke_full_smoke.png
+  boa_offset_audit:
+    # Smoke must not need the cache or a fetched scene, and there is no offline
+    # half of a distribution comparison worth rehearsing on its own. So it
+    # FABRICATES a small set of uint16 patches with a known offset built in,
+    # runs the identical statistics and verdict code over them, and asserts
+    # nothing about real data. It proves the arithmetic executes; it cannot
+    # prove anything about SEN2NAIP.
+    fabricate: true
+    fabricate_patches: 12
+    fabricate_size_px: 32
+    num_patches: 12
+    # The fabricated LR raster smoke_view.py --smoke writes, NOT the real Delhi
+    # scene: --smoke must run in a clean checkout, and data/delhi/ is gitignored
+    # imagery. Run smoke_view.py --smoke first and the two smoke paths compose,
+    # the same way validate_sr.py --smoke composes with it.
+    scene: outputs/smoke/delhi_smoke_lr.tif
+  artefact_metrics:
+    # Scores the fabricated LR/SR pair that smoke_view.py --smoke writes, so
+    # the two smoke paths compose exactly as smoke_view and validate_sr do.
+    input: outputs/smoke/delhi_smoke_lr.tif
+    rasters:
+      - label: smoke fabricated
+        path: outputs/smoke/delhi_smoke_sr.tif
+        dn_offset: 0.0
+    crop_xy: [8, 8]
+    crop_lr_px: 64
+    out_json: outputs/metrics/artefact_metrics_smoke.json
   eval_runA:
     # There is no trained checkpoint for the synthetic stub, and inventing one
     # in code would leave the checkpoint-loading path -- the part most likely to
@@ -1301,6 +1328,117 @@ huggingface:
     Run A: EDSR-baseline x4 for Sentinel-2 10 m -> 2.5 m, 4-band RGBN.
     L1 only, 40k iterations. Beats bicubic on PSNR, SSIM and LPIPS over the
     full 1199-patch validation split.
+
+# ---------------------------------------------------------------------------
+# scripts/boa_offset_audit.py -- is the training data BOA-offset-corrected?
+#
+# THIS BLOCK EXISTS BECAUSE THE ANSWER WAS ONCE ONLY IN A CHAT LOG. The offset
+# verdict of 2026-09-08 (see delhi.dn_offset) was measured by a throwaway
+# script, and every number it produced entered docs/PROGRESS.md by hand. That
+# is precisely how the Day 2 ringing and high-frequency definitions were lost,
+# which the addendum in that file complains about. So the measurement is an
+# entry point now, and re-deriving the verdict is one command.
+#
+# Nothing here is a threshold that a result must clear. The script reports
+# distributions and names the closer hypothesis; a person reads it.
+boa_offset_audit:
+  # Patches drawn from the cached training set. >= 200 was the brief; 250
+  # leaves margin without making the run slow. Sampling is seeded from
+  # `seed` at the top of this file, so the table is reproducible.
+  num_patches: 250
+
+  # Which half of the cached pair to measure. "lr" is the model INPUT and so
+  # the only side whose distribution an inference scene has to match; "hr" is
+  # the NAIP target and lives in a different radiometry entirely.
+  side: lr
+
+  # Reported per band, in this order. p5 and p95 are the span the brief asked
+  # to judge on; min and max are printed but deliberately NOT decisive, since
+  # a single saturated pixel moves them and an additive offset does not.
+  percentiles: [1, 5, 50, 95, 99]
+
+  # The two candidate conversions, as DN offsets to SUBTRACT before dividing
+  # by dataset.reflectance_scale. H1 is what inference did before 2026-09-08;
+  # H2 is delhi.dn_offset. Adding a third hypothesis is an edit here.
+  hypotheses:
+    H1: 0.0
+    H2: 1000.0
+
+  # The inference scene to test against the training distribution.
+  scene: data/delhi/delhi_A_20241030.tif
+
+  # Cohort split for the baseline cross-check. ESA introduced the -1000 offset
+  # at processing baseline 04.00 on 2022-01-25. The cache records no S2 item id
+  # and no baseline -- see the note in docs/PROGRESS.md -- so the only date
+  # available is the NAIP acquisition year parsed from the sample id, used here
+  # as a PROXY. If the two cohorts agree, the correction belongs to the dataset
+  # build rather than to the baseline, which is the actual finding.
+  cohort_split_year: 2022
+
+  # Reported alongside the reflectance tables. This is the decisive statistic:
+  # an uncorrected baseline >= 04.00 product cannot put pixels below the
+  # offset, so a large fraction below it proves the correction was applied.
+  dn_floor_probe: 1000
+
+# ---------------------------------------------------------------------------
+# scripts/artefact_metrics.py -- the four Day 2 artefact numbers, reproducibly.
+#
+# Day 2 section 3 reported a gradient ratio, a flat-quartile high-frequency
+# ratio, a ringing percentage and a colour-shift MAE, and recorded NONE of
+# their definitions. When the BOA offset had to be re-measured the ringing and
+# HF numbers could not be compared to the originals at all -- only the two
+# whose definitions happened to be recoverable reproduced. Every window size
+# and quantile below is here so that cannot happen again.
+#
+# These are DIAGNOSTICS on data with no ground truth. They compare an SR raster
+# against interpolation baselines and against its own input; none of them is an
+# accuracy measurement and none may be quoted as one.
+artefact_metrics:
+  input: data/delhi/delhi_A_20241030.tif
+  # Rasters to score. Each entry gives a label, the file, and the dn_offset the
+  # inference run used -- which is needed to put its pixels back into the
+  # reflectance the model actually emitted. A list so old and new can be scored
+  # side by side by one invocation of one definition, which is the whole point.
+  rasters:
+    - label: H2 offset 1000
+      path: outputs/delhi_A_sr.tif
+      dn_offset: 1000.0
+
+  scale: 4
+
+  # The crop, in LR pixels. Pinned rather than searched: smoke_view.py's
+  # built-up search chose (830, 286) on this scene and a report compares
+  # numbers over ONE piece of ground, not over whatever each run happened to
+  # find. Re-run smoke_view.py to change it, then record the new value here.
+  crop_xy: [830, 286]
+  crop_lr_px: 256
+
+  # Local mean window for the high-pass, in HR pixels. HF energy is the mean
+  # square of (image - boxblur(image)), so this size IS the definition of
+  # "high frequency" and changing it changes every HF number in the report.
+  highpass_window_px: 5
+
+  # "Flat" is the lowest quartile of local variance, computed on the LR input
+  # (never on an SR output -- scoring a model inside a mask it drew itself is
+  # circular). Window is in LR pixels.
+  flat_quantile: 0.25
+  flat_variance_window_lr_px: 5
+
+  # Ringing: the fraction of SR pixels outside the local min-max envelope of
+  # the LR source, the envelope taken over this window in LR PIXELS and then
+  # replicated to the HR grid. A real detail recovered by super-resolution
+  # still lies within the neighbourhood the LR pixels bracket; overshoot does
+  # not. Bicubic is scored the same way in the same run, because the number
+  # means nothing without that reference.
+  envelope_window_lr_px: 9
+
+  # Spectral round trip: degrade the SR back to the input GSD by x4 area
+  # average and difference against the input. Reported as MAE in reflectance
+  # plus the per-band signed mean, because the SIGN is the finding -- a
+  # consistent per-band bias is a colour shift, noise is not.
+  report_per_band_bias: true
+
+  out_json: outputs/metrics/artefact_metrics.json
 
 # ---------------------------------------------------------------------------
 # scripts/validate_sr.py -- does the SR GeoTIFF survive contact with rasterio?

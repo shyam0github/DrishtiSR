@@ -279,6 +279,62 @@ uncorrected signature — a floor at ~1000 (B04 882, B03 1019, B08 1034).
 > DN floor was measured rather than reasoned about: it answers the question the
 > metadata cannot.
 
+### The three tables in full
+
+Reproduce with `.venv/Scripts/python.exe scripts/boa_offset_audit.py`. All
+values are surface reflectance, **unclipped**, nodata excluded. `span` is
+p95 − p5.
+
+**(1) Training — `sen2naipv2-crosssensor` LR patches, n=250, `dn / 10000`**
+
+| band | min | p1 | p5 | p50 | p95 | p99 | max | mean | span |
+|---|---|---|---|---|---|---|---|---|---|
+| B04 | 0.0000 | 0.0236 | 0.0380 | 0.1104 | 0.2432 | 0.3216 | 1.1288 | 0.1215 | 0.2052 |
+| B03 | 0.0000 | 0.0352 | 0.0500 | 0.0932 | 0.1880 | 0.2636 | 0.9656 | 0.1031 | 0.1380 |
+| B02 | 0.0000 | 0.0164 | 0.0268 | 0.0664 | 0.1420 | 0.2116 | 0.8828 | 0.0733 | 0.1152 |
+| B08 | 0.0000 | 0.1236 | 0.1672 | 0.2504 | 0.3880 | 0.4740 | 1.1968 | 0.2606 | 0.2208 |
+
+**(H1) `delhi_A_20241030.tif`, `dn / 10000`**
+
+| band | min | p1 | p5 | p50 | p95 | p99 | max | mean | span |
+|---|---|---|---|---|---|---|---|---|---|
+| B04 | 0.0882 | 0.1274 | 0.1349 | 0.1764 | 0.2710 | 0.3264 | 0.7364 | 0.1879 | 0.1361 |
+| B03 | 0.1019 | 0.1322 | 0.1422 | 0.1750 | 0.2494 | 0.2974 | 0.7748 | 0.1838 | 0.1072 |
+| B02 | 0.0000 | 0.1107 | 0.1180 | 0.1505 | 0.2246 | 0.2688 | 1.0912 | 0.1596 | 0.1066 |
+| B08 | 0.1034 | 0.1359 | 0.2225 | 0.3077 | 0.4116 | 0.4575 | 0.7496 | 0.3107 | 0.1891 |
+
+**(H2) `delhi_A_20241030.tif`, `(dn − 1000) / 10000`**
+
+| band | min | p1 | p5 | p50 | p95 | p99 | max | mean | span |
+|---|---|---|---|---|---|---|---|---|---|
+| B04 | −0.0118 | 0.0274 | 0.0349 | 0.0764 | 0.1710 | 0.2264 | 0.6364 | 0.0879 | 0.1361 |
+| B03 | 0.0019 | 0.0322 | 0.0422 | 0.0750 | 0.1494 | 0.1974 | 0.6748 | 0.0838 | 0.1072 |
+| B02 | −0.1000 | 0.0107 | 0.0180 | 0.0505 | 0.1246 | 0.1688 | 0.9912 | 0.0596 | 0.1066 |
+| B08 | 0.0034 | 0.0359 | 0.1225 | 0.2077 | 0.3116 | 0.3575 | 0.6496 | 0.2107 | 0.1891 |
+
+Read the **p1 column of table 1 against table H1**: the training set has 1% of
+its visible-band pixels below 0.016–0.035 reflectance, and `delhi_A` under H1
+has *nothing* below 0.11. A distribution cannot lose its entire dark tail to
+anything but an unsubtracted additive offset. Table H2 restores it. Note also
+that the negative minima in H2 (B04 −0.0118, B02 −0.1000) are **not** an error
+to clip away: offset-corrected dark water and deep shadow legitimately go
+slightly negative, and `AGENTS.md` forbids silently clamping them.
+
+### These numbers are now reproducible
+
+Both measurements were made by throwaway scripts, which is exactly the failure
+§3 of the Day 2 entry suffers from — its ringing and HF definitions were lost,
+so the re-run below could not be compared to it on those two metrics. They are
+entry points now:
+
+| script | produces | smoke |
+|---|---|---|
+| `scripts/boa_offset_audit.py` | the three tables, the median verdict, the DN-floor cohorts | fabricated patches, no cache or network |
+| `scripts/artefact_metrics.py` | the four artefact numbers, definitions written to `outputs/metrics/artefact_metrics.json` | scores the pair `smoke_view.py --smoke` fabricates |
+
+Both re-derive every value quoted in this document exactly, including the
+old-vs-new artefact table below.
+
 ### What changed
 
 - `src/infer/tiled.py` gained `--dn-offset` / `run_file(dn_offset=...)`,
@@ -321,6 +377,17 @@ sharpness was overshoot.
 > definition applied to both rasters, so the old-vs-new comparison holds even
 > though the absolutes are not comparable to §3's text.
 
+> **A bug worth recording, found while making the above reproducible.** Metrics
+> 1 and 2 (gradient, HF energy) compare SR against bicubic and are invariant to
+> an additive offset. Metrics 3 and 4 (ringing, spectral round trip) compare SR
+> against the LR **input** in absolute terms and are not. The first version of
+> `artefact_metrics.py` read the input once with `dn_offset=0` and scored the
+> corrected raster against it, reporting **88.5% ringing and 0.1005 MAE** for a
+> raster whose real figures are 0.79% and 0.0049 — a number that looks like a
+> catastrophic finding and is purely a units mismatch. The script now rebuilds
+> the input crop and its baselines in each raster's own convention, and
+> `tests/test_artefact_metrics.py` pins the failure.
+
 `scripts/validate_sr.py` on the new raster: **10 of 10 checks pass**, DN range
 [712, 8999], 0 saturated, origin delta (0, 0) m. Figures regenerated on the same
 automatically-found crop (x=830, y=286, mean NDVI 0.215).
@@ -334,6 +401,11 @@ automatically-found crop (x=830, y=286, mean NDVI 0.215).
     --dn-offset 1000
 .venv/Scripts/python.exe scripts/validate_sr.py
 .venv/Scripts/python.exe scripts/smoke_view.py
+
+# The verdict and the four artefact numbers, from the definitions in
+# cfg.boa_offset_audit and cfg.artefact_metrics rather than from this file.
+.venv/Scripts/python.exe scripts/boa_offset_audit.py
+.venv/Scripts/python.exe scripts/artefact_metrics.py
 ```
 
 > **Still not true.** Everything in Day 2 §4 stands: the checkpoint is still
