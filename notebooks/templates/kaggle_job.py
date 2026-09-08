@@ -65,6 +65,31 @@ print(f"Working directory {os.getcwd()}")
 print(f"Interpreter {sys.executable}")
 print(f"Python {sys.version}")
 
+# THE ACCELERATOR THIS SESSION ACTUALLY GOT, not the one that was requested.
+#
+# MEASURED 2026-09-08 by reading the completed Run A log: it recorded the
+# commit, the interpreter and the Python version, and NOWHERE the GPU. So the
+# only evidence Run A ran on a T4 rather than a P100 was indirect -- the pushed
+# machine_shape, plus the fact that 40,000 CUDA iterations completed at all,
+# which a Pascal card cannot do on this image. Kaggle honours machine_shape
+# silently or ignores it silently, so "what we asked for" is not an answer.
+# Three Day 3 runs are about to be sized off these timings; the card they ran on
+# has to be in the log next to them.
+try:
+    import torch
+
+    if torch.cuda.is_available():
+        print(f"GPU {torch.cuda.get_device_name(0)} "
+              f"(capability sm_{''.join(str(n) for n in torch.cuda.get_device_capability(0))}, "
+              f"{torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB)")
+        print(f"torch {torch.__version__}, CUDA {torch.version.cuda}")
+    else:
+        print("GPU none -- torch.cuda.is_available() is False (CPU session)")
+except ImportError:
+    # A CPU job may legitimately run before torch is installed. That is not a
+    # reason to fail the session, but it IS recorded rather than passed over.
+    print("GPU unknown -- torch is not importable in this session")
+
 # %%
 # 2. Dependencies, and the five functions this notebook is allowed to call.
 from src.utils.kaggle_session import (

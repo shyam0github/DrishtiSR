@@ -169,13 +169,10 @@ texture.** Both halves of that sentence are supported:
 - **No ground truth over Delhi.** There is no 2.5 m reference for this scene.
   Every Delhi statement is qualitative or a self-consistency check. Accuracy
   numbers come only from the SEN2NAIP validation split.
-- **Open question — the BOA offset.** `data/delhi/manifest.json` records that
-  the on-disk pixels are **raw digital numbers, not offset-corrected**, with a
-  derived `boa_add_offset_dn` of −1000 per band; `run_file` simply divides by
-  10000. Whether the SEN2NAIPv2 rasters Run A trained on carry that offset was
-  **not verified**. If they do, inference is running on a distribution shifted
-  by 0.1 reflectance, which would plausibly explain part of the systematic
-  colour bias in §3. Resolve before any Delhi number is reported as accuracy.
+- ~~**Open question — the BOA offset.**~~ **CLOSED 2026-09-08, empirically.**
+  The offset WAS needed. See the Day 2 addendum below: every number in §3 above
+  was measured on Delhi inputs a uniform +0.1 reflectance too bright, and §3 is
+  superseded by the re-run recorded there.
 - **One scene only.** `data/delhi/delhi_B_20241030.tif` (Gurugram edge, mixed
   peri-urban and agriculture) was fetched but not super-resolved. Farmland is a
   different texture and the texture-invention finding above should be re-checked
@@ -219,7 +216,188 @@ guards has moved.
    flat-area texture invention measured in §3.
 2. Add the spectral-consistency loss; re-measure the 59 DN round-trip error as
    a tracked metric rather than a one-off.
-3. Settle the BOA offset question above before quoting any Delhi accuracy.
+3. ~~Settle the BOA offset question above~~ — settled 2026-09-08, see the
+   addendum below. Delhi numbers are re-measured with `--dn-offset 1000`.
 4. Get under the 1,000,000-parameter budget — Run A's headroom problem is
    structural, not a matter of trimming.
 5. Run scene B and repeat the artefact read on agricultural texture.
+
+---
+
+## Day 2 addendum — the BOA offset, settled empirically
+
+**Verdict: the offset was needed. `reflectance = (dn − 1000) / 10000`, not
+`dn / 10000`.** Every artefact number in Day 2 §3 was measured on Delhi inputs a
+uniform **+0.1 reflectance too bright**, and is superseded by the table below.
+
+### How it was decided
+
+Not from documentation — Planetary Computer's `sentinel-2-l2a` items expose no
+`s2:boa_add_offset` and no `raster:bands`, which is why `fetch_delhi.py` had to
+derive the value from the processing baseline in the first place. The real
+question was never what Delhi carries; it was **whether the SEN2NAIPv2 training
+data is itself offset-corrected**, because if it were not, applying the offset
+would be the error rather than the fix. That is answerable from the pixels.
+
+Measured over **250 random `sen2naipv2-crosssensor` LR patches** — the exact
+`(4, 130, 130)` uint16 arrays the dataset hands the model, nodata excluded,
+unclipped — against `data/delhi/delhi_A_20241030.tif`:
+
+| band | SEN2NAIP LR median | Delhi `dn/10000` | Delhi `(dn−1000)/10000` |
+|---|---|---|---|
+| B04 | 0.1104 | 0.1764 (**+0.0660**) | 0.0764 (−0.0340) |
+| B03 | 0.0932 | 0.1750 (**+0.0818**) | 0.0750 (−0.0182) |
+| B02 | 0.0664 | 0.1505 (**+0.0841**) | 0.0505 (−0.0159) |
+| B08 | 0.2504 | 0.3077 (**+0.0573**) | 0.2077 (−0.0427) |
+
+Sum of absolute median offsets: **0.2892 without, 0.1108 with**. The p5–p95
+span is *identical* under both hypotheses (0.1361 / 0.1072 / 0.1066 / 0.1891) —
+an additive shift cannot change a span — so the verdict rests on the medians and
+on the floor below, never on the span or on min/max.
+
+**The decisive evidence is the DN floor.** In raw DN, over the same 250 patches:
+
+| cohort | B02 min | B02 p5 | B02 median | B02 pixels below DN 1000 |
+|---|---|---|---|---|
+| SEN2NAIP LR, NAIP date pre-2022 (n=177) | 0 | 260 | 652 | **82.1%** |
+| SEN2NAIP LR, NAIP date 2022+ (n=73) | 0 | 284 | 692 | **81.0%** |
+| Delhi `delhi_A`, raw DN | 0 | 1180 | 1505 | ~0% |
+
+An uncorrected baseline ≥ 04.00 product **cannot** put 82% of a band below
+DN 1000 — the offset shifts the whole distribution up by exactly that. And the
+two SEN2NAIP cohorts are indistinguishable, which straddles ESA's baseline 04.00
+cutover (2022-01-25): the correction is a property of **the dataset build**, not
+of the acquisition date. Delhi, fetched as raw DN from baseline 05.11, shows the
+uncorrected signature — a floor at ~1000 (B04 882, B03 1019, B08 1034).
+
+> **On the acquisition-date cross-check.** SEN2NAIP sample ids carry the **NAIP**
+> acquisition date (2019 ×37, 2020 ×54, 2021 ×86, 2022 ×73 in the sample), not
+> the Sentinel-2 one, and the cached per-record JSON holds `crs`,
+> `geotransform`, `data_split` and `correlation` — no S2 item id and no
+> processing baseline. So the baseline is **not recoverable** from the cache and
+> the date cohorts above are a proxy for it. That is exactly why the stratified
+> DN floor was measured rather than reasoned about: it answers the question the
+> metadata cannot.
+
+### What changed
+
+- `src/infer/tiled.py` gained `--dn-offset` / `run_file(dn_offset=...)`,
+  **default 0.0**, so every existing caller is byte-identical. Forward:
+  `reflectance = (dn − dn_offset) / reflect_div`. The uint16 write inverts the
+  *same* transform (`dn = reflectance × div + offset`), so the SR raster keeps
+  its input's DN convention and stays comparable to it band for band.
+- `configs/base.yaml` gained `delhi.dn_offset: 1000.0`, with the measurement
+  above recorded beside it. It is a separate key from `delhi.boa_offset_dn`
+  (−1000) on purpose: one is what ESA publishes, the other is what a caller
+  subtracts, and a sign error between them is the bug the block guards.
+
+### Re-run of §3, old vs new
+
+Both columns are the same crop (LR 256 px at x=830, y=286), the same checkpoint
+and the same measurement code — only `--dn-offset` differs.
+
+| metric | §3 as published (H1, no offset) | re-measured (H2, offset 1000) |
+|---|---|---|
+| gradient ratio vs bicubic | 1.30× | **1.10×** |
+| flat-quartile HF energy ratio | 2.99× | **1.86×** |
+| ringing, % outside the 9×9 LR envelope | 3.18% (bicubic 0.98%) | **0.79%** (bicubic 0.98%) |
+| colour-shift MAE, reflectance | 0.0059 (58.6 DN) | **0.0049 (49.4 DN)** |
+| per-band signed round-trip delta | B04 −0.0022, B03 −0.0039, B02 −0.0022, B08 +0.0031 | **B04 −0.0011, B03 −0.0017, B02 −0.0009, B08 +0.0016** |
+
+**Every artefact shrank, and one changed its verdict.** Ringing goes from
+**3.2× bicubic to below bicubic** — the "classic L1-EDSR edge overshoot" of §3
+was substantially an out-of-distribution artefact, not a property of the model.
+Flat-area texture invention drops by 38%, and the spectral round-trip error by
+16% with every per-band bias roughly halved. The gradient ratio falls from 1.30×
+to 1.10×, which is the same finding read honestly: part of what looked like
+sharpness was overshoot.
+
+> The gradient ratio (1.300×) and the colour-shift MAE (0.0059, and all four
+> per-band signs) reproduce §3's published values exactly, which is what
+> licenses the comparison. The ringing and HF-energy **absolute** values do not
+> match §3's (18.1% / 5.7% and 1.71×) — those used a different envelope and
+> high-pass definition, not recorded at the time. The SR:bicubic ringing *ratio*
+> does reproduce §3's exactly (3.2×). Both columns above come from one
+> definition applied to both rasters, so the old-vs-new comparison holds even
+> though the absolutes are not comparable to §3's text.
+
+`scripts/validate_sr.py` on the new raster: **10 of 10 checks pass**, DN range
+[712, 8999], 0 saturated, origin delta (0, 0) m. Figures regenerated on the same
+automatically-found crop (x=830, y=286, mean NDVI 0.215).
+
+### Reproducing
+
+```bash
+.venv/Scripts/python.exe -m drishtisr.infer.tiled --ckpt runs/runA/best.pt \
+    --input data/delhi/delhi_A_20241030.tif --output outputs/delhi_A_sr.tif \
+    --tile 256 --overlap 32 --scale 4 --out-dtype uint16 --device cpu --amp 0 \
+    --dn-offset 1000
+.venv/Scripts/python.exe scripts/validate_sr.py
+.venv/Scripts/python.exe scripts/smoke_view.py
+```
+
+> **Still not true.** Everything in Day 2 §4 stands: the checkpoint is still
+> 1,518,724 parameters against a 1,000,000 budget, there is still no uncertainty
+> head, no spectral-consistency loss, no ONNX/INT8 path, no ground truth over
+> Delhi, and scene B is still not super-resolved. Correcting the offset makes
+> the Delhi read *honest*; it does not make it an accuracy measurement.
+
+---
+
+## Day 2 addendum — Kaggle tooling, before Day 3 spends GPU-hours
+
+### Run A, as actually measured (for sizing Day 3)
+
+Read from the completed kernel log, `outputs/kaggle/runa/_logs/drishtisr-runa.log`:
+
+| | |
+|---|---|
+| iterations | 40,000 (batch 16, 64 px LR patches, ×4, AMP on) |
+| **sec/100it** | **median 27.7 s** (mean 27.9, min 25.5; the first window, 40.9 s, is warm-up) |
+| **wall clock** | **186.0 min = 3.10 h** (`[done] iters=40000 elapsed=186.0 min`) |
+| best val PSNR | 35.284 dB at it 8,000 — and *falling* thereafter (35.03 at 40k) |
+| Kaggle Python | 3.12.13 |
+| commit | `0dffbbb` |
+
+**Three runs of this shape cost ≈9.3 GPU-hours** of the 30-hour weekly budget.
+Note the validation curve: everything after it 8,000 was spent getting worse.
+40k iterations is not the right length for a run of this size.
+
+> **Which GPU: T4 — but the log does not say so, and that is now fixed.** The
+> pushed `kernel-metadata.json` carries `"machine_shape": "NvidiaTeslaT4"`, and
+> 40,000 CUDA iterations completed, which a P100 cannot do on this image (it
+> dies on the first op with `cudaErrorNoKernelImageForDevice`). That is strong
+> but *indirect*. The notebook template now prints
+> `torch.cuda.get_device_name(0)`, its compute capability, its memory and the
+> torch/CUDA versions in the header cell, so every future run records the card
+> it actually got, next to its timings.
+
+### Three fixes
+
+1. **`logs` crashed on Windows (`charmap`).** MEASURED: 7 of Run A's 620 log
+   lines contain U+2501, from pip's progress bars; printing them to a cp1252
+   console raised `UnicodeEncodeError` mid-log, so `logs` failed on precisely
+   the runs most worth reading. `make_console_unencodable_safe()` now sets
+   `errors="backslashreplace"` on stdout/stderr at startup and leaves the
+   encoding alone — forcing UTF-8 onto a cp1252 console would trade a crash for
+   mojibake.
+2. **The `train` job is deleted.** It named `entry: scripts/train.py`, which has
+   never existed in this repository (the trainer is `src/train.py`, reached as
+   `python -m drishtisr.train`), so it died in `generate_kernel`'s entry-point
+   check on every attempt and was never pushed. Its `entry_args` were wrong too
+   — `--config configs/base.yaml`, which `src/train.py` does not accept and
+   which omits the `--data-module/--data-class/--data-root` it requires. Day 3's
+   runs are defined by copying `runa`, which has actually run.
+3. **The accelerator guard now exists.** T4-not-P100 previously lived in two
+   comments, one config default and a pytest that reads the jobs file as
+   committed — nothing refused a hand-edited `accelerator: NvidiaTeslaP100`, and
+   the only job whose comments carried the rule was the unpushable `train`.
+   `check_accelerator()` now runs inside `validate_job()`, i.e. at jobs-file
+   **load** time, so it fires for every job on every command (`jobs`, `push`,
+   `status`, `logs`) and *before* the entry-point check that used to stand in
+   front of it. It refuses anything not on
+   `cfg.kaggle_run.allowed_accelerators`, quoting P100's specific reason from
+   `cfg.kaggle_run.forbidden_accelerators`.
+
+Five new tests cover the guard (P100 refused, unknown value refused, CPU job not
+checked, `train` cannot return without a real entry point) and the console fix.

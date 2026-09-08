@@ -74,7 +74,7 @@ def test_gpu_jobs_request_t4_and_never_p100(cfg, jobs):
 
 def test_metadata_carries_the_accelerator_only_for_gpu_jobs(cfg, jobs):
     """A CPU job must not name an accelerator; Kaggle would allocate one."""
-    gpu = kr.kernel_metadata(cfg, "someone", "train", jobs["train"])
+    gpu = kr.kernel_metadata(cfg, "someone", "runa", jobs["runa"])
     assert gpu["enable_gpu"] is True
     assert gpu["machine_shape"] == "NvidiaTeslaT4"
 
@@ -207,9 +207,9 @@ def test_generated_notebook_code_is_valid_python(cfg, jobs):
 def test_generated_notebook_pins_the_commit(cfg, jobs):
     """The SHA must appear in the notebook: it is the whole provenance claim."""
     sha = "0123456789abcdef0123456789abcdef01234567"
-    tokens = kr.build_tokens(cfg, "train", jobs["train"], sha, "https://example.com/r.git")
+    tokens = kr.build_tokens(cfg, "runa", jobs["runa"], sha, "https://example.com/r.git")
     source = kr.render_template(
-        (kr.repo_root() / str(jobs["train"].template)).read_text(encoding="utf-8"), tokens
+        (kr.repo_root() / str(jobs["runa"].template)).read_text(encoding="utf-8"), tokens
     )
     assert source.count(sha) >= 2  # the header table and the checkout literal
     assert "checkout" in source and "--detach" in source
@@ -265,7 +265,66 @@ def test_missing_entry_point_is_caught_before_the_push(cfg, jobs, tmp_path, monk
 
 
 def test_the_three_starting_jobs_exist(jobs):
-    assert {"verify", "baseline", "train"} <= set(jobs.keys())
+    assert {"verify", "baseline", "runa"} <= set(jobs.keys())
+
+
+def test_a_gpu_job_asking_for_a_p100_is_refused_at_load_time(cfg, tmp_path):
+    """The T4-not-P100 rule has to bite a job definition, not just a pytest.
+
+    Before 2026-09-08 it lived only in comments, in cfg.kaggle_run.accelerator
+    and in test_gpu_jobs_request_t4_and_never_p100 above -- which checks the
+    jobs file as committed and so says nothing about a job someone edits.
+    Nothing refused an explicit `accelerator: NvidiaTeslaP100`. The job that
+    carried the rule in its comments (`train`) named an entry point that never
+    existed, so it could not be pushed and the rule was never reached.
+
+    check_accelerator runs inside validate_job, i.e. at jobs-file load time, so
+    it fires for every command and before generate_kernel's entry-point check.
+    """
+    job = OmegaConf.create({"enable_gpu": True, "accelerator": "NvidiaTeslaP100"})
+    with pytest.raises(kr.RunError, match="cudaErrorNoKernelImageForDevice"):
+        kr.check_accelerator("runa", job, tmp_path / "jobs.yaml", cfg)
+
+
+def test_an_unrecognised_accelerator_is_refused_rather_than_sent(cfg, tmp_path):
+    """Kaggle ignores a machine_shape it does not know and picks its own GPU."""
+    job = OmegaConf.create({"enable_gpu": True, "accelerator": "NvidiaH100"})
+    with pytest.raises(kr.RunError, match="is not allowed"):
+        kr.check_accelerator("runa", job, tmp_path / "jobs.yaml", cfg)
+
+
+def test_a_cpu_job_is_not_checked_for_an_accelerator(cfg, tmp_path):
+    """kernel_metadata writes no machine_shape for a CPU job, so nothing to guard."""
+    job = OmegaConf.create({"enable_gpu": False, "accelerator": "NvidiaTeslaP100"})
+    kr.check_accelerator("baseline", job, tmp_path / "jobs.yaml", cfg)
+
+
+def test_the_removed_train_job_is_not_silently_back(jobs):
+    """`train` named scripts/train.py, which has never existed in this repo.
+
+    If it reappears, it must be as a job whose entry point resolves -- which
+    test_a_module_entry_point_resolves_to_a_real_file below now covers for every
+    job. This test exists so the deletion is deliberate rather than lost.
+    """
+    if "train" in jobs:
+        assert kr.entry_point_path(jobs["train"]).is_file(), (
+            "the 'train' job is back but its entry point still does not exist"
+        )
+
+
+def test_a_kaggle_log_with_box_drawing_does_not_kill_a_cp1252_console(capsys):
+    """MEASURED: 7 of Run A's 620 log lines carry U+2501, from pip's progress bars.
+
+    Printing them to a Windows console whose stdout encoding is cp1252 raised
+    UnicodeEncodeError mid-log, so `logs` failed on exactly the runs worth
+    reading. make_console_unencodable_safe() switches the error handler without
+    touching the encoding.
+    """
+    kr.make_console_unencodable_safe()
+    line = "━" * 8
+    assert line.encode("cp1252", errors="backslashreplace").decode("ascii")
+    print(line)
+    assert capsys.readouterr().out.strip()
 
 
 def test_defaults_are_merged_into_every_job(jobs):
@@ -325,7 +384,7 @@ def test_jobs_do_not_install_the_pinned_requirements_file(jobs):
 
 
 def test_an_unknown_job_lists_the_known_ones(cfg):
-    with pytest.raises(kr.RunError, match="Defined jobs: baseline, runa, train, verify"):
+    with pytest.raises(kr.RunError, match="Defined jobs: baseline, runa, verify"):
         kr.resolve_job(cfg, "no-such-job")
 
 
@@ -342,6 +401,7 @@ def test_an_incomplete_job_is_refused_by_name(tmp_path):
             OmegaConf.create({"title": "A job", "entry": "scripts/x.py"}),
             path,
             "half",
+            kr.load_config("configs/base.yaml", smoke=False, overrides=[]),
         )
 
 
@@ -373,14 +433,16 @@ def test_every_job_title_slugifies_to_its_kernel_slug(cfg, jobs):
         )
 
 
-def test_a_title_that_would_land_elsewhere_is_refused(tmp_path):
+def test_a_title_that_would_land_elsewhere_is_refused(cfg, tmp_path):
     """The exact configuration that produced the unreachable kernel."""
     job = OmegaConf.create(
         {key: "x" for key in kr.REQUIRED_JOB_KEYS}
         | {"title": "DrishtiSR verify data root", "entry": "scripts/x.py"}
     )
     with pytest.raises(kr.RunError, match="does not match its kernel slug"):
-        kr.validate_job("verify", job, tmp_path / "jobs.yaml", "drishtisr-verify")
+        kr.validate_job(
+            "verify", job, tmp_path / "jobs.yaml", "drishtisr-verify", cfg
+        )
 
 
 @pytest.mark.parametrize(
@@ -441,18 +503,18 @@ def test_enum_replies_are_recognised_as_real_states(reply, expected):
 
 def test_kernel_id_takes_its_owner_from_the_credentials(cfg):
     """No username in version control: the repo works for anyone who clones it."""
-    assert kr.kernel_id(cfg, "someone", "train") == "someone/drishtisr-train"
+    assert kr.kernel_id(cfg, "someone", "runa") == "someone/drishtisr-runa"
     assert "someone" not in OmegaConf.to_yaml(cfg.kaggle_run)
 
 
 def test_bare_dataset_slugs_gain_the_owner_prefix(cfg, jobs):
-    metadata = kr.kernel_metadata(cfg, "someone", "train", jobs["train"])
+    metadata = kr.kernel_metadata(cfg, "someone", "runa", jobs["runa"])
     assert metadata["dataset_sources"] == ["someone/drishtisr-sen2naipv2-cache"]
 
 
 def test_fully_qualified_dataset_sources_are_left_alone(cfg, jobs):
-    job = OmegaConf.merge(jobs["train"], {"dataset_sources": ["elsewhere/public-data"]})
-    metadata = kr.kernel_metadata(cfg, "someone", "train", job)
+    job = OmegaConf.merge(jobs["runa"], {"dataset_sources": ["elsewhere/public-data"]})
+    metadata = kr.kernel_metadata(cfg, "someone", "runa", job)
     assert metadata["dataset_sources"] == ["elsewhere/public-data"]
 
 

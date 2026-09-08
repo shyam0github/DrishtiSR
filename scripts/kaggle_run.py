@@ -178,7 +178,7 @@ def load_jobs(cfg: Any) -> DictConfig:
         {name: OmegaConf.merge(defaults, job) for name, job in raw.jobs.items()}
     )
     for name, job in merged.items():
-        validate_job(name, job, path, kernel_slug(cfg, name))
+        validate_job(name, job, path, kernel_slug(cfg, name), cfg)
     return merged
 
 
@@ -208,9 +208,69 @@ def slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")
 
 
-def validate_job(name: str, job: Any, path: Path, expected_slug: str) -> None:
-    """Check one job definition has everything the template needs, and is named
-    consistently.
+def check_accelerator(name: str, job: Any, path: Path, cfg: Any) -> None:
+    """Refuse a GPU job that asks for an accelerator we know does not work.
+
+    Called from :func:`validate_job`, which runs at jobs-file LOAD time. That
+    placement is the whole point. The T4-not-P100 rule previously lived in a
+    pytest, in two code comments and in one config default, and nothing checked
+    an actual job definition: a job overriding ``accelerator: NvidiaTeslaP100``
+    would have been generated and pushed without a word. The one job that
+    carried the rule in its comments, ``train``, named an entry point
+    (``scripts/train.py``) that has never existed, so it could not be pushed and
+    the rule was never reached at all.
+
+    Load time also means this fires for ``jobs``, ``status`` and ``logs``, not
+    only for ``push`` -- and before :func:`generate_kernel`'s entry-point check,
+    which is what used to stand in front of it.
+
+    Args:
+        name: The job's key in the jobs file.
+        job: The merged job definition.
+        path: The jobs file, for the error message.
+        cfg: The loaded base config; reads ``kaggle_run.allowed_accelerators``
+            and ``kaggle_run.forbidden_accelerators``.
+
+    Raises:
+        RunError: ``enable_gpu`` is true and the requested accelerator is not
+            on the allowlist. A CPU job's accelerator is ignored rather than
+            checked, because :func:`kernel_metadata` never writes one.
+    """
+    if not job.get("enable_gpu"):
+        return
+
+    requested = str(job.get("accelerator") or cfg.kaggle_run.accelerator)
+    allowed = [str(value) for value in cfg.kaggle_run.allowed_accelerators]
+    if requested in allowed:
+        return
+
+    forbidden = cfg.kaggle_run.get("forbidden_accelerators") or {}
+    reason = str(forbidden.get(requested, "")).strip()
+    raise RunError(
+        f"The job {name!r} in {path} asks for accelerator {requested!r}, which "
+        "is not allowed.\n"
+        + (f"\n  {reason}\n" if reason else "")
+        + "\n"
+        f"Allowed: {', '.join(allowed)}.\n"
+        "\n"
+        "These are kagglesdk ApiSaveKernelRequest.machine_shape values. Kaggle "
+        "does not reject a machine_shape it fails to recognise -- it silently "
+        "falls back to whatever GPU it feels like, which is how a run A session "
+        "landed on a P100 and died on its first CUDA op. So an unrecognised "
+        "value is refused here rather than sent.\n"
+        "\n"
+        f"Fix: drop the job's 'accelerator' key to inherit "
+        f"{str(cfg.kaggle_run.accelerator)!r}, or set it to one of the allowed "
+        "values. To permit a new one, add it to "
+        "cfg.kaggle_run.allowed_accelerators -- deliberately, with a note."
+    )
+
+
+def validate_job(
+    name: str, job: Any, path: Path, expected_slug: str, cfg: Any
+) -> None:
+    """Check one job definition has everything the template needs, is named
+    consistently, and asks for an accelerator that exists.
 
     Runs at load time so a half-written job produces one plain sentence here,
     rather than an OmegaConf attribute error from somewhere inside template
@@ -221,10 +281,13 @@ def validate_job(name: str, job: Any, path: Path, expected_slug: str) -> None:
         job: The merged job definition.
         path: The jobs file, for the error message.
         expected_slug: The bare kernel slug this job must resolve to.
+        cfg: The loaded base config, for the accelerator allowlist.
 
     Raises:
-        RunError: A required key is absent, or the title does not slugify to the
-            kernel slug -- see below, this one is not cosmetic.
+        RunError: A required key is absent, the title does not slugify to the
+            kernel slug, or a GPU job asks for an accelerator that is not on
+            ``cfg.kaggle_run.allowed_accelerators``. None of the three is
+            cosmetic -- see the notes at each check.
     """
     declared = [key for key in ENTRY_KEYS if job.get(key)]
     if len(declared) != 1:
@@ -262,6 +325,8 @@ def validate_job(name: str, job: Any, path: Path, expected_slug: str) -> None:
     #
     # So the two are required to agree here, before anything is pushed. Which
     # field Kaggle honours then stops mattering: both name the same kernel.
+    check_accelerator(name, job, path, cfg)
+
     actual = slugify(str(job.title))
     if actual != expected_slug:
         raise RunError(
@@ -1907,7 +1972,37 @@ HANDLERS = {
 }
 
 
+def make_console_unencodable_safe() -> None:
+    """Stop a Kaggle log from killing this script on a legacy Windows console.
+
+    MEASURED 2026-09-08 against the real Run A log, ``drishtisr-runa.log``:
+    7 of its 620 lines contain U+2501 (heavy box drawing) -- pip's progress
+    bars from the session's package install. Printing
+    those on a Windows console whose stdout encoding is cp1252 -- the default
+    for a non-UTF-8 code page, which is what ``py``/``python.exe`` gets here --
+    raises ``UnicodeEncodeError: 'charmap' codec can't encode character
+    '━'``. The traceback lands in the middle of the log, so ``logs`` fails
+    on precisely the runs whose output is most worth reading.
+
+    The encoding is left ALONE and only the error handler is changed: forcing
+    UTF-8 onto a cp1252 console would print mojibake for every box character
+    instead of crashing on some, which is a different way of being unreadable.
+    ``backslashreplace`` renders the unencodable character as its escape, so
+    the line survives and says what it lost.
+
+    A stream that cannot be reconfigured (a pipe wrapper, a captured stream
+    under pytest) is left as it is; this is a display convenience and must not
+    become a reason the script fails to start.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        reconfigure(errors="backslashreplace")
+
+
 def main(argv=None) -> int:
+    make_console_unencodable_safe()
     args = parse_args(argv)
     cfg = load_config(args.config, smoke=args.smoke, overrides=args.overrides)
 

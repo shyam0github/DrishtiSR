@@ -1022,6 +1022,31 @@ kaggle_run:
   # minutes setting up. T4 (sm_75) is covered by the same build.
   accelerator: NvidiaTeslaT4
 
+  # THE GUARD THAT MAKES THE LINE ABOVE MORE THAN A COMMENT.
+  #
+  # Checked by validate_job() at JOBS-FILE LOAD TIME, so it fires on every
+  # command -- jobs, push, status, logs -- for every GPU job, before anything
+  # is generated and long before anything is pushed. It used to be enforced
+  # only by a pytest and by this default; a job that set `accelerator:
+  # NvidiaTeslaP100` by hand would have been pushed without complaint.
+  #
+  # Values are kagglesdk ApiSaveKernelRequest.machine_shape names. Anything not
+  # on this list is refused rather than passed through: Kaggle silently ignores
+  # a machine_shape it does not recognise and falls back to its default GPU,
+  # which is the exact failure mode that cost a runA session.
+  allowed_accelerators:
+    - NvidiaTeslaT4
+    - Tpu1VmV38
+  # Refused with the specific reason rather than the generic "not allowed"
+  # message, because this one has a story and someone will otherwise try it.
+  forbidden_accelerators:
+    NvidiaTeslaP100: >
+      P100 is Pascal (sm_60) and the Kaggle image's cu128 PyTorch carries no
+      Pascal kernels. torch imports, torch.cuda.is_available() returns True,
+      the device names itself correctly, and the first real CUDA op dies with
+      cudaErrorNoKernelImageForDevice -- after the session has queued, booted,
+      cloned and installed. Use NvidiaTeslaT4 (sm_75).
+
   # `status --watch` polling. 60 s is well inside Kaggle's rate limits and fine
   # for jobs measured in minutes to hours; the ceiling is a stop so an
   # unattended watch cannot poll for days against a wedged session.
@@ -1140,6 +1165,39 @@ delhi:
   # at baseline 04.00 (2022-01-25); anything earlier genuinely has none.
   boa_offset_baseline_threshold: "04.00"
   boa_offset_dn: -1000.0
+
+  # THE OFFSET TO ACTUALLY APPLY AT INFERENCE, as a value to SUBTRACT from the
+  # raw DN on disk:  reflectance = (dn - dn_offset) / dataset.reflectance_scale
+  # This is boa_offset_dn with the sign flipped, kept as a separate key because
+  # it is the number a caller passes to src/infer/tiled.py --dn-offset, and a
+  # sign error between "ESA publishes -1000" and "subtract 1000" is exactly the
+  # bug this block exists to prevent.
+  #
+  # SETTLED EMPIRICALLY 2026-09-08, not from documentation. The question was
+  # whether the SEN2NAIPv2 training data is itself offset-corrected; if it were
+  # not, applying this would be the error rather than the fix. Measured over 250
+  # random sen2naipv2-crosssensor LR patches -- the exact arrays the dataset
+  # hands the model -- against delhi_A_20241030.tif:
+  #
+  #   median reflectance, SEN2NAIP LR vs Delhi:
+  #     band   SEN2NAIP   delhi dn/10000   delhi (dn-1000)/10000
+  #     B04      0.1104       0.1764  (+0.066)     0.0764  (-0.034)
+  #     B03      0.0932       0.1750  (+0.082)     0.0750  (-0.018)
+  #     B02      0.0664       0.1505  (+0.084)     0.0505  (-0.016)
+  #     B08      0.2504       0.3077  (+0.057)     0.2077  (-0.043)
+  #   sum |median offset|:  no-offset 0.289,  offset 0.111.
+  #
+  # And the decisive one, on raw DN: 82% of SEN2NAIP LR B02 pixels are below
+  # DN 1000, with a floor at 0 -- in BOTH the pre-2022 and the 2022+ acquisition
+  # cohorts, so the correction is a property of the dataset build and not of the
+  # ESA baseline. Uncorrected baseline >= 04.00 product cannot reach below 1000.
+  # Delhi's raw DN floors at 882/1019/0/1034, the uncorrected signature.
+  #
+  # Therefore SEN2NAIP is offset-corrected, data/delhi/*.tif is not, and
+  # inference on Delhi MUST pass this. The p5-p95 span per band is identical
+  # under both hypotheses (an additive shift cannot change a span), which is why
+  # the verdict rests on the medians and the DN floor.
+  dn_offset: 1000.0
 
 # Run A evaluation: the trained EDSR-baseline checkpoint against the bicubic
 # floor, read by scripts/eval_runA.py.

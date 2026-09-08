@@ -148,21 +148,25 @@ jobs:
     expected_runtime_min: 45
 
   # ----------------------------------------------------------------- train ---
-  train:
-    title: DrishtiSR train
-    description: >
-      Train the super-resolution model with the heteroscedastic uncertainty
-      head. The only job here that spends the weekly 30-hour GPU budget, and the
-      reason the data guard exists.
-    enable_gpu: true
-    # T4, NOT P100 -- see the accelerator note in scripts/kaggle_run.py and in
-    # the kaggle_run block of configs/base.yaml. A P100 session imports torch
-    # fine and reports torch.cuda.is_available() == True, then dies on the first
-    # CUDA op.
-    accelerator: NvidiaTeslaT4
-    entry: scripts/train.py
-    entry_args: ["--config", "configs/base.yaml"]
-    expected_runtime_min: 480
+  # REMOVED 2026-09-08. It named `entry: scripts/train.py`, which has never
+  # existed in this repository -- the trainer is src/train.py, reached as
+  # `python -m drishtisr.train`, which is what `runa` below does. So the job was
+  # unpushable from the day it was written: every attempt died in
+  # generate_kernel()'s entry-point check. Its `entry_args` were wrong too
+  # (`--config configs/base.yaml`; src/train.py takes no --config and requires
+  # --data-module/--data-class/--data-root), so fixing only the path would have
+  # traded a local failure for a Kaggle-side argparse failure after the queue
+  # wait.
+  #
+  # It also carried the only in-repo statement of the T4-not-P100 rule outside a
+  # comment and a pytest, and because the job could not be pushed that rule was
+  # never enforced against a real job definition. It now is, at jobs-file load
+  # time, by check_accelerator() in scripts/kaggle_run.py against
+  # cfg.kaggle_run.allowed_accelerators -- so deleting this stub costs nothing
+  # and removes a guard that only looked like one.
+  #
+  # Day 3's runs are defined by copying `runa`, which has actually run.
+
 
   # ------------------------------------------------------------------ runA ---
   # Run A: the EDSR-baseline L1 reference run. No uncertainty head, no spectral

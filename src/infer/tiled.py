@@ -150,34 +150,58 @@ def run_file(
     reflect_div: float = 10000.0,
     out_dtype: str = "uint16",
     bands: list[int] | None = None,
+    dn_offset: float = 0.0,
 ) -> dict:
     """Super-resolve a GeoTIFF on disk, preserving its georeferencing.
 
-    Reads uint16 digital numbers, divides by `reflect_div` to get surface
-    reflectance (float32 [C, H, W], nominally [0, 1], unclipped), runs
-    `sr_array`, and writes the result back.
+    Reads uint16 digital numbers and converts them to surface reflectance with
+
+        reflectance = (dn - dn_offset) / reflect_div
+
+    giving float32 [C, H, W] (channel-first), nominally [0, 1] but UNCLIPPED --
+    bright roofs, cloud and specular water legitimately exceed 1.0, and after
+    the offset subtraction dark water may fall slightly below 0. Both are real
+    radiometry and are passed to the model untouched. `sr_array` then runs, and
+    the result is written back.
+
+    `dn_offset` is Sentinel-2's BOA_ADD_OFFSET, expressed as the value to
+    SUBTRACT (ESA publishes it as -1000, i.e. dn_offset=1000 here). It defaults
+    to 0.0, which reproduces the previous `dn / reflect_div` behaviour exactly,
+    so no existing caller changes. It matters because the training data is
+    offset-corrected: MEASURED 2026-09-08 over 250 random SEN2NAIPv2-crosssensor
+    LR patches, 82% of B02 pixels sit below DN 1000 with a floor at 0, in BOTH
+    the pre-2022 and the 2022+ acquisition cohorts. Uncorrected baseline >= 04.00
+    product cannot do that. A raw-DN scene fed in with dn_offset=0 therefore
+    reaches the model a uniform +0.1 reflectance too bright, which is a large
+    fractional error over water, asphalt and shadow -- most of an urban scene.
+    See `cfg.delhi.dn_offset`.
 
     The output keeps the source CRS and top-left origin exactly; only the
     pixel size is divided by `scale` (10 m -> 2.5 m at scale=4).
 
-    With `out_dtype="uint16"` the reflectance is scaled back by `reflect_div`
-    and clipped to [0, 65535]. That clip is a property of the storage dtype,
-    not of the model: it is the only clip in this path, and `out_dtype`
-    ="float32" avoids it entirely when unclipped reflectance must survive.
+    With `out_dtype="uint16"` the reflectance is inverted back through the
+    SAME transform -- `dn = reflectance * reflect_div + dn_offset` -- so the
+    output raster carries the identical DN convention as its input and stays
+    comparable to it band for band. It is then clipped to [0, 65535]. That clip
+    is a property of the storage dtype, not of the model: it is the only clip
+    in this path, and `out_dtype="float32"` avoids it entirely, writing
+    unclipped reflectance, when the true radiometry must survive.
     """
     import rasterio
     from rasterio.transform import Affine
 
+    reflect_off = np.float32(dn_offset)
+
     with rasterio.open(src_path) as src:
         idx = bands or list(range(1, src.count + 1))
-        arr = src.read(idx).astype(np.float32) / reflect_div
+        arr = (src.read(idx).astype(np.float32) - reflect_off) / reflect_div
         prof = src.profile.copy()
         transform, crs = src.transform, src.crs
 
     sr = sr_array(arr, model, scale, tile, overlap, device, amp)
 
     if out_dtype == "uint16":
-        dn = sr * reflect_div
+        dn = sr * reflect_div + reflect_off
         n_clipped = int(np.count_nonzero((dn < 0) | (dn > 65535)))
         if n_clipped:
             LOGGER.warning(
@@ -222,13 +246,17 @@ def main() -> None:
     p.add_argument("--tile", type=int, default=256)
     p.add_argument("--overlap", type=int, default=32)
     p.add_argument("--reflect-div", type=float, default=10000.0)
+    # BOA_ADD_OFFSET as a value to SUBTRACT: pass 1000 for a Sentinel-2 L2A
+    # scene at processing baseline >= 04.00 held on disk as raw DN. Default 0
+    # keeps the historical behaviour for every other caller. See run_file.
+    p.add_argument("--dn-offset", type=float, default=0.0)
     p.add_argument("--out-dtype", default="uint16", choices=["uint16", "float32"])
     p.add_argument("--amp", type=int, default=1)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     a = p.parse_args()
     model = load_ckpt(a.ckpt, a.device)
     info = run_file(a.input, a.output, model, a.scale, a.tile, a.overlap, a.device,
-                    bool(a.amp), a.reflect_div, a.out_dtype)
+                    bool(a.amp), a.reflect_div, a.out_dtype, dn_offset=a.dn_offset)
     print(info)
 
 
