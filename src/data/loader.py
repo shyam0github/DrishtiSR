@@ -51,6 +51,7 @@ from src.data.registry import get_dataset
 from src.data.splits import geographic_split, scene_group_key
 from src.utils.logging import get_logger
 from src.utils.paths import resolve_output_path
+from src.utils.seed import numpy_generator
 
 __all__ = [
     "PatchDataset",
@@ -458,10 +459,37 @@ class PatchDataset(Dataset):
     def set_epoch(self, epoch: int) -> None:
         """Set the epoch that seeds random-mode crops.
 
-        Call once per epoch from the training loop. Without it every epoch draws
-        the same crops, which turns a random-crop augmentation into a fixed one.
+        Call once per epoch from the training loop, BEFORE that epoch's
+        iterator is created. Without it every epoch draws the same crops:
+        MEASURED on Run A, whose loop never called this, so 40k iterations saw
+        one fixed set of 2400 crops and the model duly memorised them.
+
+        IGNORED IN GRID MODE, deliberately and loudly. Validation and test
+        enumerate their patches once at construction and must keep them for the
+        life of the process: a val set that resamples makes every validation
+        point a measurement of different data, so the training curve stops
+        being a curve and the Day 1 bicubic baseline stops being a reference.
+        The epoch stays pinned at 0 there no matter what a caller passes.
+
+        Args:
+            epoch: Epoch number, 0-based.
+
+        Raises:
+            ValueError: ``epoch`` is negative.
         """
-        self.epoch = int(epoch)
+        epoch = int(epoch)
+        if epoch < 0:
+            raise ValueError(f"epoch must be >= 0; got {epoch}.")
+        if self._index is not None:
+            if epoch != self.epoch:
+                self.logger.debug(
+                    "Split %r is grid mode; ignoring set_epoch(%d) and keeping "
+                    "crops fixed at epoch 0.",
+                    self.split_name,
+                    epoch,
+                )
+            return
+        self.epoch = epoch
 
     def __len__(self) -> int:
         if self._index is not None:
@@ -469,13 +497,21 @@ class PatchDataset(Dataset):
         return len(self.indices) * self.random_per_sample
 
     def _rng_for(self, item: int) -> np.random.Generator:
-        """Per-item generator seeded by ``(seed, epoch, item)``.
+        """Per-item generator seeded by ``(seed, epoch, item)`` on the ``crop`` stream.
 
         Seeding per item rather than per worker is what makes the crop sequence
         independent of ``cfg.train.num_workers``: the same config gives the same
-        crops on 0 workers and on 6.
+        crops on 0 workers and on 6. The seed goes through
+        :func:`src.utils.seed.derive_seed`, which hashes the triple, so the
+        ``crop`` stream and the ``augment`` stream in
+        :mod:`src.data.adapter` are independent -- changing how augmentation
+        draws cannot shift which pixels were cropped.
+
+        This is the guarantee Run A2 (control) and Run B (fix) rest on: same
+        seed, same epoch, same index, byte-identical crop, so any difference in
+        their curves is the change under test and not the data.
         """
-        return np.random.default_rng([self.seed, self.epoch, int(item)])
+        return numpy_generator(self.seed, self.epoch, int(item), "crop")
 
     def __getitem__(self, item: int) -> Dict[str, Any]:
         """Return one patch pair.

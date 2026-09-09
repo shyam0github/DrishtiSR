@@ -105,7 +105,7 @@ from huggingface_hub import hf_hub_download
 # The EDSR definition is in the DrishtiSR repo: src/models/edsr.py
 from src.models.edsr import build_model
 
-path = hf_hub_download("<your-hf-username>/drishtisr-edsr-baseline-x4", "best.pt")
+path = hf_hub_download("0shyam/drishtisr-edsr-baseline-x4", "best.pt")
 ckpt = torch.load(path, map_location="cpu", weights_only=False)
 
 model = build_model(

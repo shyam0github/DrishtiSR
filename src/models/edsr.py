@@ -1,8 +1,20 @@
 """EDSR-baseline for DrishtiSR (Sentinel-2 x4 SR, 4-band RGBN).
 
-Params @ defaults (16 blocks, 64 feats, 4->4 ch, x4): ~1.52 M.
-Expects inputs already normalised to roughly [0, 1] (reflectance / 10000).
-Place at: src/drishtisr/models/edsr.py
+Params @ defaults (16 blocks, 48 feats, 4->4 ch, x4): 855,652 -- under
+``cfg.runtime.max_parameters`` (1,000,000), which is a hard deliverable, not a
+target. The width was 64 through Run A, which is 1,518,724 and over budget; it
+also had more capacity than ~2400 training patches can support, and Run A duly
+peaked at 8k iterations and declined to 40k. Both problems have the same fix.
+
+WIDTH IS THE KNOB, NOT DEPTH. Params scale as ``n_resblocks * n_feats^2``, so
+narrowing 64 -> 48 buys a 44% cut while keeping all 16 blocks and therefore the
+receptive field. Dropping blocks instead would have cost context, which is what
+an SR model uses to decide what the missing detail should be.
+
+Expects surface reflectance, float32, nominally [0, 1] and UNCLIPPED -- bright
+targets (cloud, snow, specular water, bright roofs) legitimately exceed 1.0 and
+are NOT clamped anywhere in this file. No ImageNet or per-channel statistics are
+applied: the input is a physical quantity and stays one.
 """
 from __future__ import annotations
 
@@ -50,7 +62,7 @@ class EDSR(nn.Module):
         self,
         scale: int = 4,
         n_resblocks: int = 16,
-        n_feats: int = 64,
+        n_feats: int = 48,
         in_ch: int = 4,
         out_ch: int = 4,
         res_scale: float = 1.0,
@@ -88,3 +100,4 @@ if __name__ == "__main__":
     y = m(x)
     print(f"params={count_params(m):,}  in={tuple(x.shape)}  out={tuple(y.shape)}")
     assert y.shape == (2, 4, 256, 256)
+    assert count_params(m) == 855_652, count_params(m)

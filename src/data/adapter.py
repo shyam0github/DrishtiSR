@@ -31,6 +31,11 @@ membership.
 Reflectance is passed through untouched: surface reflectance, float32,
 nominally [0, 1] and UNCLIPPED -- bright targets legitimately exceed 1.0. This
 adapter does not normalise, standardise, or clamp.
+
+The one thing it does add is GEOMETRIC augmentation, on the training split
+only: a dihedral transform drawn once per item and applied to the LR and the HR
+by the same call, via :mod:`src.data.augment`. It moves pixels, never their
+values, so the reflectance guarantee above survives it intact.
 """
 from __future__ import annotations
 
@@ -40,11 +45,13 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch.utils.data import Dataset
 
+from src.data.augment import augment_pair
 from src.data.loader import PatchDataset, resolve_split_assignments, select_indices
 from src.data.registry import get_dataset_class
 from src.utils.config import load_config
 from src.utils.logging import get_logger
 from src.utils.paths import resolve_cache_dir
+from src.utils.seed import torch_generator
 
 __all__ = ["SRPatchDataset"]
 
@@ -52,6 +59,11 @@ __all__ = ["SRPatchDataset"]
 # Day 1 bicubic baseline -- are computed over. Random crops are for training
 # only. Any split not named here is read deterministically.
 _RANDOM_SPLITS = ("train",)
+
+# Splits that may be augmented. Same list, stated separately because the two
+# decisions are separate: "random" is about WHERE the crop comes from, augment
+# is about what happens to it afterwards. Both must stay off for val and test.
+_AUGMENTED_SPLITS = ("train",)
 
 
 class SRPatchDataset(Dataset):
@@ -74,6 +86,7 @@ class SRPatchDataset(Dataset):
         dataset_name: str = "sen2naipv2",
         mode: Optional[str] = None,
         validate: bool = True,
+        augment: bool = True,
     ) -> None:
         """
         Args:
@@ -98,6 +111,15 @@ class SRPatchDataset(Dataset):
             mode: ``"grid"`` or ``"random"``. Defaults to ``"random"`` for the
                 training split and ``"grid"`` for every other split.
             validate: Passed to the underlying dataset's sample validation.
+            augment: Draw a random dihedral transform per item and apply it to
+                the LR and the HR together (see :mod:`src.data.augment`).
+                IGNORED AND FORCED OFF for every split but ``"train"``: a
+                validation number is only comparable to the Day 1 bicubic
+                baseline if it is measured on the same fixed patches, and an
+                augmented val set would move that reference every time the RNG
+                advanced. The resolved value is on ``self.augment``, and it is
+                logged, so a run's metadata records what was actually applied
+                rather than what was asked for.
 
         Raises:
             FileNotFoundError: ``root`` does not exist, or holds no subset
@@ -132,15 +154,28 @@ class SRPatchDataset(Dataset):
         self.mode = resolved_mode
         self.cfg = cfg
 
+        # Forced, not merely defaulted: the caller cannot switch augmentation on
+        # for a split whose whole job is to stay fixed.
+        self.augment = bool(augment) and self.split in _AUGMENTED_SPLITS
+
         self.logger = get_logger("data.adapter", log_file=cfg["paths"]["log_file"])
         self.logger.info(
-            "SRPatchDataset(split=%r, patch_lr=%d, scale=%d, mode=%r, cache=%s)",
+            "SRPatchDataset(split=%r, patch_lr=%d, scale=%d, mode=%r, "
+            "augment=%r, cache=%s)",
             self.split,
             self.patch_lr,
             self.scale,
             resolved_mode,
+            self.augment,
             cache_root,
         )
+        if bool(augment) and not self.augment:
+            self.logger.info(
+                "augment=True was requested for split %r but only %s is "
+                "augmented; augmentation is OFF for this dataset.",
+                self.split,
+                " / ".join(repr(s) for s in _AUGMENTED_SPLITS),
+            )
 
         dataset_cls = get_dataset_class(dataset_name)
         self.source = dataset_cls(cfg, validate=validate)
@@ -162,6 +197,12 @@ class SRPatchDataset(Dataset):
             split_name=self.split,
             logger=self.logger,
         )
+
+        # The run seed, for the per-sample augmentation stream. Read from the
+        # config, never a literal, and the SAME value PatchDataset seeds crops
+        # from -- the two decisions share the triple and differ only by stream
+        # name, so a sample's crop and its flip move together across runs.
+        self.seed = int(cfg["seed"])
 
         self.bands = tuple(cfg["dataset"]["bands"])
 
@@ -213,7 +254,24 @@ class SRPatchDataset(Dataset):
         )
 
     def set_epoch(self, epoch: int) -> None:
-        """Advance the random-crop RNG stream. No-op in grid mode."""
+        """Advance the crop AND augmentation streams to ``epoch``.
+
+        Must be called once per epoch, before that epoch's DataLoader iterator
+        is created -- see the epoch loop in ``src/train.py``. Both streams read
+        ``self.patches.epoch``, so one call moves them together and there is no
+        state to keep in sync.
+
+        Refused in grid mode by :meth:`PatchDataset.set_epoch`, which pins val
+        and test at epoch 0 forever. Because the augmentation stream reads the
+        same attribute, that pin covers augmentation too: a deterministic split
+        cannot be made non-deterministic from here.
+
+        Args:
+            epoch: Epoch number, 0-based.
+
+        Raises:
+            ValueError: ``epoch`` is negative.
+        """
         self.patches.set_epoch(int(epoch))
 
     def __len__(self) -> int:
@@ -229,7 +287,24 @@ class SRPatchDataset(Dataset):
             ``{"lr": float32 (C, patch_lr, patch_lr),
             "hr": float32 (C, patch_lr*scale, patch_lr*scale)}``. Surface
             reflectance in both, channel order ``cfg.dataset.bands``, nominally
-            [0, 1] and UNCLIPPED above 1.0.
+            [0, 1] and UNCLIPPED above 1.0. When ``self.augment`` is set, both
+            tensors have had the SAME randomly drawn dihedral transform applied
+            (:func:`src.data.augment.augment_pair`); shapes, dtypes and
+            reflectance values are unaffected, only the spatial layout.
         """
         item = self.patches[index]
-        return {"lr": item["lr"], "hr": item["hr"]}
+        lr, hr = item["lr"], item["hr"]
+        if self.augment:
+            # Seeded from the SAME (seed, epoch, index) triple as the crop, on
+            # a separate stream. Not the global RNG: that advances per worker
+            # and would make the transform a function of num_workers and batch
+            # order, so Run A2 and Run B could not be guaranteed the identical
+            # data stream the comparison depends on.
+            lr, hr = augment_pair(
+                lr,
+                hr,
+                generator=torch_generator(
+                    self.seed, self.patches.epoch, int(index), "augment"
+                ),
+            )
+        return {"lr": lr, "hr": hr}

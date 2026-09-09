@@ -211,6 +211,18 @@ jobs:
       # parameter count 1,518,724; in-ch 3 would give 1,517,571.
       - "--in-ch"
       - "4"
+      # PINNED 2026-09-08, and it was previously implicit. Day 3 moved
+      # src/train.py's --n-feats default from 64 to 48 (855,652 params, inside
+      # cfg.runtime.max_parameters) and --wd's from 1e-4 to 0. This job relied
+      # on the old defaults for n-feats, so without this line re-running it
+      # would train a DIFFERENT model and quietly file the result under
+      # "runA". Spelled out so this job keeps reproducing the run it describes.
+      #
+      # DO NOT reuse this job for a Day 3 run. Copy it, drop these two pins,
+      # and take the values from configs/frozen_day3.yaml -- whose config_hash
+      # must go into the run's metadata JSON.
+      - "--n-feats"
+      - "64"
       - "--lr"
       - "2e-4"
       - "--min-lr"
@@ -245,3 +257,67 @@ jobs:
       - "--out"
       - "/kaggle/working/runs/runA"
     expected_runtime_min: 510
+
+  # ------------------------------------------------------------------ day3 ---
+  # THREE RUNS, ONE SESSION. A2 (control, spectral off), B1 (the primary
+  # result), and B2 (upside, wall-clock guarded) -- all from
+  # configs/frozen_day3.yaml, all at the same commit, differing in exactly two
+  # floats.
+  #
+  # Entry is scripts/day3_runs.py rather than three copies of `runa` with
+  # different lambdas, and that is the whole design. Three hand-written argument
+  # lists that must agree in twenty places will eventually not, and the
+  # disagreement surfaces as an unexplainable difference between two curves
+  # after the GPU-hours are spent. The script builds ONE shared list, adds the
+  # lambdas, and asserts before launching that nothing else differs.
+  #
+  # ONE session rather than three also fixes the accelerator: Kaggle honours
+  # machine_shape silently or ignores it silently, so three sessions are three
+  # chances to compare a T4 run against a P100 run without knowing it.
+  day3:
+    title: DrishtiSR day3
+    description: >
+      Day 3 spectral-consistency experiment: run A2 (lambda 0.0/0.0, the
+      control), B1 (0.1/0.02, the primary result) and, if the clock allows, B2
+      (0.3/0.06). 12k iterations each at batch 16 on 64px LR patches, x4, from
+      the frozen Day 3 config -- 48 features, weight decay 0, augmentation on,
+      seed 42 data / 1337 init. Every validation logs the blur diagnostic
+      against fixed bicubic and ground-truth reference lines, so a spectral run
+      buying consistency with blur is visible while it trains rather than
+      afterwards. A2 and B1 are the deliverable; B2 is skipped if under 2.5x the
+      median run duration remains.
+    enable_gpu: true
+    accelerator: NvidiaTeslaT4
+    entry: scripts/day3_runs.py
+    entry_args:
+      # Read for seeds, paths and the supporting-file staging list. The TRAINING
+      # decisions come from configs/frozen_day3.yaml, whose hash every run
+      # records.
+      - "--config"
+      - "configs/base.yaml"
+      # Outside the clone on purpose: prune_workdir() clears the clone at the
+      # end of a successful session, and /kaggle/working is what Kaggle saves,
+      # so checkpoints here survive and are fetchable.
+      - "--runs-root"
+      - "/kaggle/working/runs"
+      - "--iters"
+      - "12000"
+      - "--ckpt-every"
+      - "1000"
+      - "--val-every"
+      - "500"
+      - "--wd"
+      - "0.0"
+      - "--spectral-downsample"
+      - "area"
+      # 8.0, not 9.0. Kaggle kills a GPU session at 9 hours and this script's
+      # clock starts AFTER the clone, the pip installs and the data guard, and
+      # ends BEFORE Kaggle's own output commit. The hour is those.
+      - "--budget-hours"
+      - "8.0"
+      - "--a2-cut-hours"
+      - "3.5"
+      - "--b2-margin"
+      - "2.5"
+    # 9 hours: the session ceiling. The script's own budget stops it earlier.
+    expected_runtime_min: 540

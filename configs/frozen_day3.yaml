@@ -1,0 +1,210 @@
+# DrishtiSR -- FROZEN training configuration, Day 3 (2026-09-08).
+#
+# WHAT THIS FILE IS. The complete set of decisions that define a training run,
+# in one place, with a hash over it. Every run from here reads this file through
+# src/config.py::load_frozen(), which recomputes the hash and REFUSES to return
+# a config whose contents no longer match `config_hash` below. The hash is then
+# written into the run's metadata JSON, so a checkpoint, a metric, and a figure
+# can each be traced back to the exact configuration that produced them.
+#
+# WHY IT IS FROZEN. Run A's decline from 8k to 40k iterations was diagnosable
+# only because its hyperparameters were recoverable afterwards. Day 3 changes
+# three of them at once (augmentation on, weight decay off, 48 features instead
+# of 64); with 30 GPU-hours a week there is no budget to discover later that a
+# run used some fourth value nobody recorded. An edit to this file is a
+# deliberate act that invalidates the hash and every comparison that cited it.
+#
+# WHAT IT IS NOT. It does not replace configs/base.yaml. base.yaml drives the
+# DATA pipeline -- band order, tiles, splits, patch filters, metric settings --
+# and the dataset adapter still loads it. This file records the TRAINING
+# decisions layered on top, including the handful (batch size, patch size,
+# seed) that appear in both and must agree. `base_config` below names the file
+# it was frozen against.
+#
+# TO CHANGE SOMETHING:
+#   1. edit the value,
+#   2. clear `config_hash` (set it to ""),
+#   3. run:  .venv\Scripts\python.exe -m src.config --write
+#   4. commit the value and the new hash together, and say in the message which
+#      previously reported numbers the change invalidates.
+
+frozen_on: "2026-09-08"
+frozen_for: "Day 3 -- Run B: Run A plus augmentation, minus weight decay, at 48 features"
+base_config: configs/base.yaml
+
+# Seeds torch / numpy / random for weight init and batch order.
+#
+# NOT the data-stream seed. Crop origins and augmentation draws are pure
+# functions of (cfg.seed, epoch, index) via src/utils/seed.py::derive_seed, and
+# cfg.seed is base.yaml's 42 -- deliberately independent of this value, so the
+# data stream is byte-identical across runs that differ only in their init
+# seed. That independence is what makes Run A2 a valid control for Run B.
+#
+# NOT a split seed either: split membership comes from
+# cfg.splits.seed (42) via outputs/splits_sen2naipv2.csv and is deliberately
+# untouched here, so this run is measured on the same val set as the Day 1
+# bicubic baseline and Run A.
+seed: 1337
+
+# ----------------------------------------------------------------- model ---
+model:
+  name: edsr_baseline
+  scale: 4
+  n_resblocks: 16
+  # 48, down from Run A's 64. VERIFIED by instantiation, not arithmetic:
+  # 16/48 -> 855,652 parameters, 16/64 -> 1,518,724. The budget is
+  # cfg.runtime.max_parameters = 1,000,000, so 64 was a violation the report
+  # had to carry a warning about, and 48 clears it with 144,348 to spare.
+  # Depth was kept at 16 on purpose -- params go as n_resblocks * n_feats^2, so
+  # narrowing pays for itself twice as fast as shortening while preserving the
+  # receptive field an SR model needs to infer missing detail.
+  n_feats: 48
+  # 4 = RGBN, matching cfg.dataset.bands (B04, B03, B02, B08). in_ch 3 would
+  # give 1,517,571 at 64 feats and a different count here; the band list is the
+  # authority, this is the consequence.
+  in_ch: 4
+  out_ch: 4
+  res_scale: 1.0
+  # Asserted against cfg.runtime.max_parameters at build time. If a change to
+  # the block above does not reproduce this number, the run must not start.
+  expected_parameters: 855652
+
+# ------------------------------------------------------------ optimisation ---
+optim:
+  optimizer: adamw
+  betas: [0.9, 0.99]
+  # ZERO. Run A used 1e-4 and still overfit, so decay was not the missing
+  # regulariser; augmentation is. On an EDSR with no normalisation layers,
+  # decoupled decay preferentially shrinks the residual branches that carry the
+  # high-frequency detail -- it buys generalisation with exactly the signal
+  # being super-resolved. Mirrored by --wd's default in src/train.py.
+  weight_decay: 0.0
+  # Gradient-norm clip. Unchanged from Run A, which never reported a spike;
+  # kept because AMP plus a fresh loss surface is not the moment to remove a
+  # cheap guard.
+  grad_clip: 1.0
+
+schedule:
+  # Cosine to min_lr after a linear warmup, over the full `iters` -- the same
+  # shape as Run A so the two curves are comparable point for point.
+  kind: cosine
+  lr: 2.0e-4
+  min_lr: 1.0e-6
+  warmup_iters: 500
+  iters: 40000
+
+# ------------------------------------------------------------------ data ---
+data:
+  module: src.data.adapter
+  cls: SRPatchDataset
+  # NOT a literal mount path. MEASURED 2026-09-06: the live Kaggle mount is
+  # /kaggle/input/datasets/<owner>/<slug>, not /kaggle/input/<slug>. "auto"
+  # defers to src.utils.paths.resolve_cache_dir, the only thing in this project
+  # allowed to decide where data lives.
+  data_root: auto
+  dataset_name: sen2naipv2
+  batch_size: 16
+  num_workers: 2
+  # LR patch edge fed to the model; the HR patch is exactly patch_lr * scale
+  # (64 -> 256). Cut out of the 128 px tiles the dataset emits
+  # (cfg.sr.lr_patch_size), which is what keeps random crops varied.
+  patch_lr: 64
+  scale: 4
+  train_split: train
+  val_split: val
+
+# --------------------------------------------------------- augmentation ---
+# The Day 3 change. Geometric only: the 8 symmetries of the square, drawn once
+# per pair and applied to the LR and HR by one call in src/data/augment.py, so
+# the two cannot be transformed independently. Proven by tests/test_augment.py,
+# which area-downsamples the augmented HR and compares it against the augmented
+# LR.
+augment:
+  enabled: true
+  hflip_p: 0.5
+  vflip_p: 0.5
+  rot90_k: [0, 1, 2, 3]
+  # NO photometric augmentation, now or later. Brightness, contrast, gamma and
+  # channel jitter all alter reflectance, and reflectance is the quantity the
+  # spectral-consistency contribution is defined over. See AGENTS.md section 1.
+  photometric: false
+  # Forced off for val and test in src/data/adapter.py regardless of the flag:
+  # an augmented val set moves the reference the Day 1 bicubic baseline was
+  # measured against.
+  splits: [train]
+
+# --------------------------------------------------------- normalisation ---
+# NONE. This is a decision, recorded here so it cannot be quietly reversed by a
+# future "just standardise the inputs" commit.
+#
+# The network consumes surface reflectance directly: float32, nominally [0, 1],
+# UNCLIPPED. Cloud, snow, specular water and bright roofs legitimately exceed
+# 1.0 and are left alone -- clipping them would teach the model that the
+# brightest targets in the scene do not exist. ImageNet statistics are
+# forbidden outright (AGENTS.md section 1.3): reflectance is a physical
+# quantity, not a photograph, and the spectral-consistency loss is only
+# meaningful while the values stay physical.
+normalization:
+  kind: none
+  # Digital number -> reflectance, applied once in the data pipeline. Mirrors
+  # cfg.dataset.reflectance_scale in base.yaml.
+  reflectance_scale: 10000.0
+  # For assertions and reporting only. NOT a clamp.
+  reflectance_nominal_max: 1.0
+  clip: false
+
+# --------------------------------------------------------------- losses ---
+loss:
+  # L1 only, as in Run A. The heteroscedastic-NLL objective is a separate
+  # contribution and gets its own frozen config, so that its effect is measured
+  # against this run rather than tangled into it.
+  kind: l1
+
+  # SPECTRAL CONSISTENCY: OFF, and recorded as off rather than omitted.
+  #
+  # These mirror --spectral-lambda1/--spectral-lambda2 in src/train.py, whose
+  # defaults are also 0.0 and which tests/test_frozen_config.py asserts against
+  # this block. Writing the zeros down is the point: the run this file describes
+  # is the CONTROL for the spectral run, and a control is only a control if the
+  # thing it is controlling for is stated. An omitted key would leave "was the
+  # spectral term on?" answerable only by reading argparse.
+  #
+  # The control still MEASURES both terms at every validation and logs them as
+  # val_l1_spec and val_sam -- see validate() in src/train.py. Without that the
+  # spectral run's improvement would have nothing to be an improvement over.
+  #
+  # The spectral run is a copy of this file with these two set to the candidate
+  # values in cfg.loss.spectral (0.5 / 0.1) and its own hash. It is NOT an edit
+  # to this file: that would invalidate the control's provenance.
+  spectral_lambda1: 0.0
+  spectral_lambda2: 0.0
+  # The degradation operator, frozen even while the lambdas are 0, because the
+  # control uses it to MEASURE. If the control measured with a different D from
+  # the spectral run, the two logged curves would not be the same quantity.
+  # Must stay antialiased; src/losses/spectral.py rejects decimating modes by
+  # name. Mirrors cfg.loss.spectral.downsample in configs/base.yaml.
+  spectral_downsample: area
+
+# -------------------------------------------------------------- runtime ---
+runtime:
+  amp: true
+  # Under Kaggle's 9-hour ceiling so the loop checkpoints and exits cleanly
+  # rather than being killed mid-write.
+  max_hours: 8.5
+  val_every: 2000
+  val_batches: 25
+  ckpt_every: 2500
+  log_every: 100
+  resume: auto
+  # T4, never P100. cu128 wheels dropped Pascal; see
+  # cfg.kaggle_run.allowed_accelerators, enforced by check_accelerator().
+  accelerator: NvidiaTeslaT4
+  # The deployment target the parameter budget exists to serve.
+  max_parameters: 1000000
+  export_num_threads: 6
+
+# SHA256 over this file with `config_hash` itself removed, canonicalised as
+# sorted-key compact JSON (see src/config.py::canonical_bytes) so it is
+# invariant to comments, key order and YAML formatting but not to a single
+# changed value. Recompute with: .venv\Scripts\python.exe -m src.config
+config_hash: "e6082c69bba3086aaf71d0a413e64d621d860e5506da507ce2d76edb92f1fc0a"

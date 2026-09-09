@@ -227,12 +227,44 @@ def run_file(
             "px": abs(new_tf.a), "crs": str(crs), "dtype": str(data.dtype)}
 
 
+# Architecture keys a checkpoint must carry to be loadable. These are NOT
+# defaulted. src/train.py saves vars(args) into every checkpoint it writes, so a
+# checkpoint missing them did not come from this project; guessing a width would
+# build a model the weights do not fit, and the resulting load error names a
+# tensor shape rather than the actual problem. scripts/eval_runA.py refuses to
+# guess for the same reason -- see its "Refusing to guess" message.
+_ARCH_KEYS = ("scale", "n_resblocks", "n_feats", "in_ch")
+
+
 def load_ckpt(ckpt: str, device: str) -> torch.nn.Module:
+    """Rebuild the model a checkpoint was trained as, and load its weights.
+
+    Args:
+        ckpt: Path to a checkpoint written by ``src/train.py``.
+        device: Torch device string; CPU is the working default everywhere here.
+
+    Returns:
+        The model in eval-ready state on ``device``, with weights loaded
+        strictly.
+
+    Raises:
+        KeyError: The checkpoint does not record the architecture it was
+            trained with, so it cannot be rebuilt without guessing.
+    """
     ck = torch.load(ckpt, map_location=device)
     a = ck.get("args", {})
-    model = build_model("edsr_baseline", scale=a.get("scale", 4),
-                        n_resblocks=a.get("n_resblocks", 16), n_feats=a.get("n_feats", 64),
-                        in_ch=a.get("in_ch", 4), out_ch=a.get("in_ch", 4))
+    missing = [k for k in _ARCH_KEYS if k not in a]
+    if missing:
+        raise KeyError(
+            f"{ckpt} does not record {missing} in its 'args', so the "
+            f"architecture cannot be rebuilt. Refusing to guess: the width "
+            f"changed from 64 to 48 features on 2026-09-08, and a wrong guess "
+            f"either fails with an unrelated shape error or -- worse -- loads "
+            f"partially and scores a half-initialised model."
+        )
+    model = build_model("edsr_baseline", scale=int(a["scale"]),
+                        n_resblocks=int(a["n_resblocks"]), n_feats=int(a["n_feats"]),
+                        in_ch=int(a["in_ch"]), out_ch=int(a["in_ch"]))
     model.load_state_dict(ck["model"])
     return model.to(device)
 

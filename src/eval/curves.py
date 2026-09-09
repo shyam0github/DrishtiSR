@@ -38,6 +38,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+from src.train import KNOWN_SCHEMAS, LEGACY_COLUMNS, LOG_COLUMNS  # noqa: E402
+
 __all__ = ["read_training_log", "curve_verdict", "plot_training_curves"]
 
 
@@ -45,13 +47,23 @@ def read_training_log(path: Any) -> Dict[str, pd.DataFrame]:
     """Split a training ``log.csv`` into its training and validation rows.
 
     Args:
-        path: Path to the CSV written by ``src/train.py``. Must have the header
-            ``iter, loss, lr, val_psnr, sec_per_100it``.
+        path: Path to the CSV written by ``src/train.py``. Must carry one of
+            the headers in :data:`src.train.KNOWN_SCHEMAS` -- the legacy Run A
+            five, those plus the spectral scalars, or the current
+            :data:`src.train.LOG_COLUMNS` which adds the blur diagnostic and
+            the reference metric suite. Each generation only appends, so all
+            three are read by the same code.
 
     Returns:
         ``{"train": DataFrame, "val": DataFrame}``. ``train`` has columns
         ``iter`` (int), ``loss`` (float), ``lr`` (float) and ``sec_per_100it``
-        (float); ``val`` has ``iter`` (int) and ``val_psnr`` (float). Both are
+        (float); ``val`` has ``iter`` (int), ``val_psnr`` (float) and, when
+        the log carries them, ``val_l1_spec`` (float, reflectance),
+        ``val_sam`` (float, radians -- the SPECTRAL-domain angle, LR against
+        the downsampled SR, not the image-domain ``val_sam_hr`` in degrees),
+        ``val_sam_valid_frac``, ``val_sharpness`` (reflectance per pixel),
+        ``val_hf_energy`` (dimensionless), ``val_ssim``, ``val_lpips``,
+        ``val_sam_hr`` (degrees) and ``val_ergas`` (all float). Both are
         sorted by ``iter`` with duplicates resolved to the last occurrence, so a
         resumed run yields one curve rather than a sawtooth.
 
@@ -71,11 +83,17 @@ def read_training_log(path: Any) -> Dict[str, pd.DataFrame]:
         )
 
     frame = pd.read_csv(csv_path)
-    expected = ["iter", "loss", "lr", "val_psnr", "sec_per_100it"]
-    if list(frame.columns) != expected:
+    # Only the schemas the trainer has actually written are accepted, and the
+    # list is IMPORTED from it rather than restated, so a new column cannot
+    # appear in one file and not the other. Each generation appends only, which
+    # is what lets one reader handle a Run A log and a Day 3 log unchanged.
+    columns = list(frame.columns)
+    if columns not in [list(schema) for schema in KNOWN_SCHEMAS]:
         raise ValueError(
-            f"{csv_path} has columns {list(frame.columns)}, expected {expected}. "
-            "This is not a log.csv written by src/train.py."
+            f"{csv_path} has columns {columns}, expected one of "
+            f"{[list(schema) for schema in KNOWN_SCHEMAS]} -- oldest is Run A's "
+            f"{list(LEGACY_COLUMNS)}, newest is {list(LOG_COLUMNS)}. This is not "
+            "a log.csv written by src/train.py."
         )
 
     train = frame[frame["loss"].notna()].copy()
@@ -97,7 +115,12 @@ def read_training_log(path: Any) -> Dict[str, pd.DataFrame]:
     train = train[["iter", "loss", "lr", "sec_per_100it"]].astype(
         {"iter": int, "loss": float, "lr": float, "sec_per_100it": float}
     )
-    val = val[["iter", "val_psnr"]].astype({"iter": int, "val_psnr": float})
+    val_columns = ["iter", "val_psnr"] + [
+        name for name in LOG_COLUMNS[len(LEGACY_COLUMNS):] if name in columns
+    ]
+    types = {name: float for name in val_columns}
+    types["iter"] = int
+    val = val[val_columns].astype(types)
 
     # A resumed run re-logs iterations it already logged. Keep the last value for
     # each iteration -- that is the one the surviving checkpoint came from.

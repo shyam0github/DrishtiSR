@@ -35,6 +35,7 @@ from src.eval.opensr_harness import (
     OpenSRSampleError,
     build_metrics,
     run_opensr_test,
+    score_arrays,
     score_triplet,
     to_opensr_triplet,
 )
@@ -591,3 +592,64 @@ def test_json_records_every_skipped_sample(tmp_path):
     assert payload["skipped"][0]["sample_id"] == "s1"
     assert payload["skip_reasons"] == {"boom": 1}
     assert payload["settings"]["border_mask"] == 16
+
+
+# -- score_arrays: the one-call adapter -----------------------------------
+
+
+def test_score_arrays_takes_numpy_in_our_convention():
+    """A caller hands it numpy (C, H, W) reflectance and gets the flat dict.
+
+    This is the contract the rest of the project codes against, so it is checked
+    on numpy rather than tensors: numpy is what an inference script, a notebook
+    cell or a figure generator actually holds.
+    """
+    cfg = make_cfg()
+    metrics, settings = build_metrics(cfg)
+    lr, sr, hr = triplet(seed=3)
+
+    out = score_arrays(
+        lr.numpy(), sr.numpy(), hr.numpy(), cfg,
+        metrics=metrics, settings=settings,
+    )
+
+    assert set(out) == set(OPENSR_METRICS)
+    assert all(isinstance(value, float) for value in out.values())
+    # Every metric on a real bicubic triplet must be a number. A NaN here is the
+    # failure mode this whole module exists to catch early.
+    assert all(math.isfinite(value) for value in out.values())
+
+
+def test_score_arrays_matches_the_two_step_path():
+    """It is exactly to_opensr_triplet + score_triplet, not a second code path.
+
+    If these ever diverge, one of the two is applying a conversion the other is
+    not, which is the single most expensive kind of bug in this module: it would
+    make every number reproducible but wrong.
+    """
+    cfg = make_cfg()
+    metrics, settings = build_metrics(cfg)
+    lr, sr, hr = triplet(seed=5)
+
+    prepared = to_opensr_triplet(lr, sr, hr, cfg, settings=settings)
+    expected = score_triplet(
+        metrics, *prepared,
+        gradient_threshold=cfg["opensr_test"]["gradient_threshold"],
+    )
+    got = score_arrays(lr, sr, hr, cfg, metrics=metrics, settings=settings)
+
+    assert got == expected
+
+
+def test_score_arrays_refuses_digital_numbers():
+    """The scale tripwire is not bypassed by using the one-call entry point."""
+    cfg = make_cfg()
+    metrics, settings = build_metrics(cfg)
+    lr, sr, hr = triplet(seed=7)
+    scale = float(cfg["dataset"]["reflectance_scale"])
+
+    with pytest.raises(OpenSRSampleError):
+        score_arrays(
+            lr * scale, sr * scale, hr * scale, cfg,
+            metrics=metrics, settings=settings,
+        )

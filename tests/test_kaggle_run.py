@@ -19,6 +19,7 @@ Nothing here touches the network, Kaggle, or the real cache.
 
 import ast
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -383,8 +384,15 @@ def test_jobs_do_not_install_the_pinned_requirements_file(jobs):
             assert "requirements" not in str(package), f"job {name!r}: {package}"
 
 
-def test_an_unknown_job_lists_the_known_ones(cfg):
-    with pytest.raises(kr.RunError, match="Defined jobs: baseline, runa, verify"):
+def test_an_unknown_job_lists_the_known_ones(cfg, jobs):
+    """The message must name every DEFINED job, not a list frozen into a test.
+
+    Written against the jobs file rather than a literal: the point of the
+    message is that a typo is answered with the real options, and a hardcoded
+    list here would go stale the next time a job is added -- which it did.
+    """
+    expected = "Defined jobs: " + ", ".join(sorted(jobs))
+    with pytest.raises(kr.RunError, match=re.escape(expected)):
         kr.resolve_job(cfg, "no-such-job")
 
 

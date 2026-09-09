@@ -467,6 +467,120 @@ train:
   num_workers: 2
   epochs: 100
 
+  # ZERO, and it is the default rather than a flag someone remembers to pass.
+  # Run A overfit ~2400 patches: val PSNR peaked at 8k iterations and declined
+  # to 40k. Weight decay was 1e-4 throughout and did not prevent it, because
+  # the problem was capacity and a static training set, not weight magnitude.
+  # Worse, AdamW's decoupled decay on an EDSR carrying no normalisation layers
+  # pulls down the residual branches, which is where the high-frequency detail
+  # that super-resolution exists to produce is generated. The fixes that did
+  # apply -- dihedral augmentation (cfg-free, src/data/augment.py) and 48
+  # features instead of 64 -- are also defaults now. Mirrored by --wd's default
+  # in src/train.py; if you change one, change both.
+  weight_decay: 0.0
+
+# Spectral-consistency objective -- technical contribution 1. Implemented in
+# src/losses/spectral.py; the floor it is judged against is printed by
+# scripts/spectral_floor.py.
+#
+#   L_spec = lambda1 * L1(x_LR, D(y_SR)) + lambda2 * SAM(x_LR, D(y_SR))
+#
+# Both terms are computed in REFLECTANCE units, matching the main L1(sr, hr)
+# reconstruction term, so lambda1 reads directly as a multiple of the main
+# loss. SAM is in radians here (src/metrics/image_quality.sam reports the same
+# angle in degrees, for a human reader).
+loss:
+  spectral:
+    # CANDIDATE weights for the spectral run. These are NOT src/train.py's
+    # defaults: --spectral-lambda1/--spectral-lambda2 default to 0.0 so the
+    # control run cannot acquire a spectral term by a forgotten flag, and a run
+    # that wants one passes these values explicitly. Recorded here so the two
+    # runs are launched from a written-down number rather than a shell history.
+    #
+    # WHETHER 0.5 IS RIGHT IS AN EMPIRICAL QUESTION, and the answer is the
+    # output of scripts/spectral_floor.py. Our LR is real Sentinel-2 and our HR
+    # is NAIP-derived, so the two have different point-spread functions and
+    # D(perfect SR) does NOT equal x_LR: there is an irreducible floor. If a
+    # trained run's l1_spec lands near that floor the consistency claim is
+    # strong; if lambda1 pushes it BELOW the floor, the term is no longer
+    # measuring consistency -- it is fighting the reconstruction L1 to match a
+    # sensor the HR was never observed by, and lambda1 must come down.
+    #
+    # MEASURED 2026-09-09 over all 1199 validation patches
+    # (outputs/metrics/spectral_floor.json):
+    #     l1_spec floor = 0.005733 +- 0.003528 reflectance
+    #     sam     floor = 0.022249 +- 0.012147 rad (1.275 deg)
+    # against a reference L1(sr, hr) of 0.008784 (Run A at convergence). At
+    # 0.5/0.1 the weighted floor is 0.00287 + 0.00222 = 0.00509, i.e. 58% of
+    # the reconstruction loss and 37% of the total objective, none of it
+    # removable. These weights are therefore an UPPER bracket to try, not a
+    # settled choice: the spectral term alone is minimised by a blurry output
+    # that averages exactly to the LR, so at this weight it competes with the
+    # detail the task exists to produce rather than constraining it. Run B
+    # should be launched watching val_l1_spec against 0.005733 from the first
+    # validation, and lambda1 lowered if it goes under.
+    lambda1: 0.5
+    lambda2: 0.1
+
+    # The degradation operator D. MUST be antialiased -- src/losses/spectral.py
+    # rejects 'nearest' and non-antialiased modes by name. With stride-4
+    # slicing the loss constrains one HR pixel in 16 and the entire consistency
+    # claim is vacuous while still reporting an excellent number.
+    #
+    # 'area' is an exact 4x4 block mean at integer scale, which is the operator
+    # the physical claim is about: the 2.5 m pixels inside a 10 m cell average
+    # to what the satellite recorded. cfg.degradation_audit measured area at
+    # 43.99 dB median against the stored LR (bilinear_antialias 45.38,
+    # bicubic_antialias 45.01) -- the alternatives fit marginally better, and
+    # are available here, but none of them is a statement about conservation of
+    # reflected energy. Changing this invalidates every previously reported
+    # spectral number, including the floor.
+    downsample: area
+
+    # Numerics. All three are gradient guards, not value fudges; see the
+    # NUMERICS section of src/losses/spectral.py.
+    #
+    # eps enters as eps**2 INSIDE the norm's square root, so a dead pixel does
+    # not put an infinite derivative into the backward pass.
+    eps: 1.0e-8
+    # The cosine is clamped to [-1 + cos_clamp, 1 - cos_clamp] before arccos,
+    # whose derivative is infinite at +-1 -- exactly where a good model sits.
+    # CONSEQUENCE: the SAM term cannot reach 0; its floor is
+    # arccos(1 - 1e-7) = 4.47e-4 rad analytically, 4.88e-4 in float32 -- 2.2%
+    # of the 0.0222 rad measured physical floor, and it applies to the training
+    # term and the measured floor identically.
+    cos_clamp: 1.0e-7
+    # Pixels whose LR or downsampled-SR spectrum has a norm below this, in
+    # reflectance units, are excluded from the SAM mean and the excluded
+    # fraction is logged as sam_valid_frac. The angle at such a pixel is
+    # undefined (nodata filled with dataset.nodata_fill = 0.0); there is
+    # deliberately no policy that reports it as 0 degrees, which would announce
+    # perfect spectral fidelity over nodata. 1e-6 reflectance is DN 0.01 at
+    # dataset.reflectance_scale = 10000 -- it catches exact fill and nothing a
+    # real land surface produces.
+    min_norm: 1.0e-6
+
+# The irreducible spectral floor, measured by scripts/spectral_floor.py over the
+# full validation split with GROUND-TRUTH HR in place of an SR output.
+spectral_floor:
+  # Patches scored. null = the entire val split, which is the honest number and
+  # what the report cites. An integer truncates for a quick check and is
+  # recorded in the JSON so a truncated run cannot be mistaken for a full one.
+  max_patches: null
+
+  # The main reconstruction loss the spectral term is weighed against, so the
+  # script can print the ratio that decides the lambdas instead of leaving a
+  # reader to do the arithmetic.
+  #
+  # MEASURED: 0.008784, the median training L1(sr, hr) over Run A's final 10k
+  # iterations (outputs/kaggle/runa/_logs/runs/runA/log.csv). Run A used 64
+  # features and no augmentation, so this is an approximation of what the Day 3
+  # architecture will converge to, not a prediction of it -- it is here to set
+  # the SCALE of the comparison, which is all the lambda decision needs.
+  reference_l1: 0.008784
+  json_name: spectral_floor.json
+  csv_name: spectral_floor_per_patch.csv
+
 # Image-quality metrics. See src/metrics/image_quality.py for the definitions and
 # src/metrics/aggregate.py for the harness that applies them.
 #
@@ -875,6 +989,21 @@ smoke:
     # imagery. Run smoke_view.py --smoke first and the two smoke paths compose,
     # the same way validate_sr.py --smoke composes with it.
     scene: outputs/smoke/delhi_smoke_lr.tif
+  spectral_floor:
+    # THE POINT OF THE SMOKE RUN, and it is a self-test rather than a rehearsal.
+    # The synthetic stub builds its LR as an exact block-mean downsample of its
+    # own HR (src/data/synthetic.py), which is precisely the operator
+    # cfg.loss.spectral.downsample = area applies. So on the stub the floor MUST
+    # come out at ~0 for L1 and at the arccos clamp floor (4.47e-4 rad) for SAM.
+    # A non-zero stub floor means the downsampler, the band order or the scale
+    # is wrong, and the number the real run prints would be wrong the same way.
+    #
+    # Separate filenames so a stub floor never lands at the real floor's path: a
+    # ~0 floor sitting in outputs/metrics/spectral_floor.json would be quoted in
+    # the report as "the sensors agree perfectly", which is the opposite of the
+    # finding.
+    json_name: spectral_floor_smoke.json
+    csv_name: spectral_floor_per_patch_smoke.csv
   artefact_metrics:
     # Scores the fabricated LR/SR pair that smoke_view.py --smoke writes, so
     # the two smoke paths compose exactly as smoke_view and validate_sr do.

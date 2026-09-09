@@ -602,6 +602,74 @@ def score_triplet(
     return values
 
 
+
+def score_arrays(
+    lr: Any,
+    sr: Any,
+    hr: Any,
+    cfg: Any,
+    metrics: Any = None,
+    settings: Optional[Mapping[str, Any]] = None,
+    gradient_threshold: Any = None,
+) -> Dict[str, float]:
+    """Score one ``(lr, sr, hr)`` triplet in OUR convention. The whole adapter.
+
+    This is :func:`to_opensr_triplet` followed by :func:`score_triplet` in a
+    single call, and it is the ONLY place a caller should convert anything.
+    Layout (``(C, H, W)``), dtype (float32), device (CPU), gradient detachment
+    and the band-order check all happen inside it. A caller that finds itself
+    transposing, rescaling or casting before calling this has moved a library
+    assumption out of the adapter and into their own code, which is exactly the
+    failure this function exists to prevent.
+
+    Nothing is rescaled or clipped. opensr-test's ``reflectance`` and
+    ``synthesis`` are absolute L1 distances and move linearly with the input
+    scale, so passing digital numbers instead of reflectance silently inflates
+    them by ``cfg.dataset.reflectance_scale`` while leaving the other five
+    metrics untouched. ``to_opensr_triplet`` enforces the tripwire on that; see
+    the module docstring.
+
+    Args:
+        lr: Low-resolution input, ``(C, h, w)`` or ``(1, C, h, w)``, numpy array
+            or torch tensor, float32 **surface reflectance**, nominally
+            ``[0, 1]`` but UNCLIPPED -- bright targets exceed 1.0 and bicubic
+            overshoot falls below 0.0 -- in ``cfg.dataset.bands`` order
+            (``[B04, B03, B02, B08]``, i.e. R, G, B, NIR).
+        sr: Super-resolved output, ``(C, h*scale, w*scale)``, same dtype, units
+            and band order as ``lr``.
+        hr: High-resolution reference, same shape and conventions as ``sr``.
+        cfg: The loaded config. Reads ``cfg.sr.scale``, ``cfg.dataset.bands``
+            and ``cfg.opensr_test``.
+        metrics: A prebuilt ``opensr_test.Metrics``. Built from ``cfg`` when
+            absent, which is slow enough that a loop should build it once and
+            pass it in.
+        settings: The settings dict returned alongside ``metrics`` by
+            :func:`build_metrics`. Must be passed with ``metrics``.
+        gradient_threshold: Overrides ``cfg.opensr_test.gradient_threshold``.
+            ``None`` uses the configured value.
+
+    Returns:
+        A flat ``{metric: float}`` over exactly :data:`OPENSR_METRICS` --
+        ``reflectance``, ``spectral``, ``spatial`` (consistency, LR vs SR
+        downsampled back to LR), ``synthesis``, and ``ha_metric`` /
+        ``om_metric`` / ``im_metric`` (correctness, which sum to 1.0). Values
+        may be NaN: ``spatial`` is NaN whenever satalign rejects the
+        translation. NaN is returned as NaN, never substituted for a number.
+
+    Raises:
+        OpenSRSampleError: The triplet violates the input contract, or
+            ``opensr_test`` itself failed on it.
+    """
+    if metrics is None or settings is None:
+        metrics, settings = build_metrics(cfg)
+    threshold = gradient_threshold
+    if threshold is None:
+        threshold = _cfg_section(cfg)["gradient_threshold"]
+
+    lr_t, sr_t, hr_t = to_opensr_triplet(lr, sr, hr, cfg, settings=settings)
+    return score_triplet(metrics, lr_t, sr_t, hr_t, gradient_threshold=threshold)
+
+
 # -- the run ---------------------------------------------------------------
 
 

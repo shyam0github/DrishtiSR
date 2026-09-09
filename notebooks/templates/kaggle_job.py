@@ -57,6 +57,23 @@ if head != GIT_SHA:
 
 os.chdir(WORKDIR)
 sys.path.insert(0, WORKDIR)
+
+# The commit above pins the CODE. This pins the CONFIG, and both are needed:
+# Day 3's frozen-crop bug changed the training data stream without touching a
+# single config value, so a matching config_hash alone would have "proved" that
+# two runs seeing different data were the same experiment.
+#
+# Verified here rather than inside the trainer so a mismatch costs the queue
+# wait and nothing else. load_frozen() raises if configs/frozen_day3.yaml was
+# edited without being re-frozen. The pair (commit, config_hash) printed below
+# is what a comparison of two runs -- A2 the control against B the fix -- is
+# entitled to assume identical; both values also land in each run's
+# run_metadata.json, written by src/train.py.
+from src.config import FROZEN_CONFIG, HASH_FIELD, load_frozen  # noqa: E402
+
+CONFIG_HASH = str(load_frozen(FROZEN_CONFIG)[HASH_FIELD])
+print(f"Frozen config {FROZEN_CONFIG} verified: {CONFIG_HASH}")
+
 print(f"Running commit {head}")
 print(f"Working directory {os.getcwd()}")
 # Recorded every run, because the Kaggle image's Python version has moved before
