@@ -15,7 +15,16 @@ What it checks, in order, stopping at the first real failure:
 3. **The manifest.** Row count, and whether it agrees with the cache.
 4. **The splits.** Row count per split, because a missing split file means the
    loader silently recomputes one, and a recomputed split is a different split.
-5. **Real samples.** Three random pairs are loaded and their shapes, dtypes, and
+5. **The split COVERS the catalog.** Present is not the same as current. MEASURED
+   2026-09-09: the Day 3 `day3` job passed this guard and died seven seconds
+   into training with "Split file covers 3000 samples but 1409 of the dataset's
+   4409 samples are absent from it". The cache had been expanded locally and the
+   split regenerated; the Kaggle dataset still carried the pre-expansion CSV.
+   The guard checked the file existed and stopped there, so it certified a
+   session that could not train. It now runs the trainer's OWN
+   ``resolve_split_assignments`` -- not a reimplementation of it -- so the guard
+   cannot pass while the loader would raise.
+6. **Real samples.** Three random pairs are loaded and their shapes, dtypes, and
    **per-band reflectance ranges** printed. This is the part that catches a
    wrong reflectance divisor, a transposed channel axis, or truncated files --
    none of which a file count would notice.
@@ -322,6 +331,85 @@ def check_splits(cfg: Any) -> Optional[dict]:
     return dict(counts)
 
 
+def check_split_covers_catalog(cfg: Any, logger: Any) -> Optional[bool]:
+    """Run the trainer's own split resolution and report whether it would raise.
+
+    THE CHECK THAT WOULD HAVE SAVED THE DAY 3 SESSION. Every check above this
+    one asks whether a file is THERE. This one asks whether it is CURRENT, which
+    is a different question and the one that actually failed: a split CSV
+    covering 3000 samples is perfectly readable, has the right columns, and
+    reports sensible per-split counts, while the catalog it is supposed to
+    describe has since grown to 4409. ``resolve_split_assignments`` refuses that
+    -- correctly, because training on the overlap would silently change the
+    val set the baseline was measured on -- and it refuses it AFTER the queue
+    wait, the pip installs and the mount.
+
+    Deliberately calls the loader's function rather than comparing counts here.
+    A reimplementation would be a second opinion that can drift from the first,
+    and the only useful guarantee is "the guard passes exactly when the trainer
+    would get past this point".
+
+    Cost: this builds the dataset, which loads the TACO catalog. MEASURED on
+    Kaggle 2026-09-09: about two seconds. That is the price of the guard being
+    predictive instead of decorative.
+
+    Args:
+        cfg: The loaded config.
+        logger: Logger, passed through to the loader for its provenance line.
+
+    Returns:
+        True when the split file covers the catalog; False when it exists but
+        does not; None when there is no split file at all, which the previous
+        check already reported and which makes coverage undefined rather than
+        failed.
+    """
+    print()
+    print("5. DOES THE SPLIT COVER THE CATALOG?")
+    print()
+
+    from src.data.loader import SplitError, resolve_split_assignments
+    from src.data.registry import get_dataset
+
+    manifest_dir = Path(resolve_output_path(cfg, "manifest_dir"))
+    split_path = manifest_dir / str(cfg.splits.output_name).format(
+        dataset=cfg.dataset.name
+    )
+    if not split_path.is_file():
+        print(f"{INFO}No split file, so coverage is undefined -- see section 4.")
+        return None
+
+    print(f"{INFO}building the dataset catalog (this reads the TACO index)...")
+    try:
+        dataset = get_dataset(cfg)
+    except ImportError as exc:
+        # tacoreader missing is a job-definition problem, not a data problem,
+        # and it has its own failure mode elsewhere. Say which it is.
+        print(f"{BAD}Cannot build the catalog: {exc}")
+        print(f"{INFO}This is a missing dependency, not a bad split. Add it to")
+        print(f"{INFO}pip_packages in configs/kaggle_jobs.yaml.")
+        return False
+
+    try:
+        assignments, source = resolve_split_assignments(cfg, dataset, logger)
+    except SplitError as exc:
+        print(f"{BAD}The split does NOT cover the catalog.")
+        for line in str(exc).splitlines():
+            print(f"{INFO}  {line}")
+        print()
+        print(f"{INFO}This is the exact exception src/train.py raises, from the")
+        print(f"{INFO}same function. A session started now dies seconds into the")
+        print(f"{INFO}first dataset build, after the queue wait and the installs.")
+        print(f"{INFO}Fix, in order:")
+        print(f"{INFO}  python scripts/make_splits.py --config configs/base.yaml")
+        print(f"{INFO}  python scripts/kaggle_upload.py version   # ship it")
+        return False
+
+    print(f"{OK}{len(assignments):,} samples resolved from {source}")
+    print(f"{INFO}The split is READ, not recomputed, and it covers every")
+    print(f"{INFO}catalog sample. src/train.py will get past this point.")
+    return True
+
+
 def describe_samples(cfg: Any, npz_paths: List[Path], count: int, seed: int) -> bool:
     """Open random samples and print shapes and per-band reflectance ranges.
 
@@ -341,7 +429,7 @@ def describe_samples(cfg: Any, npz_paths: List[Path], count: int, seed: int) -> 
         True when every opened sample looked physically plausible.
     """
     print()
-    print(f"5. REAL SAMPLES ({min(count, len(npz_paths))} chosen at random)")
+    print(f"6. REAL SAMPLES ({min(count, len(npz_paths))} chosen at random)")
 
     bands = [str(b) for b in cfg.dataset.bands]
     scale = float(cfg.dataset.reflectance_scale)
@@ -442,6 +530,7 @@ def main(argv=None) -> int:
     subset_dir, npz_paths = check_cache(cfg, resolved["cache_dir"])
     manifest = check_manifest(cfg, len(npz_paths))
     splits = check_splits(cfg)
+    coverage_ok = check_split_covers_catalog(cfg, logger)
 
     samples_ok = False
     if npz_paths:
@@ -456,7 +545,14 @@ def main(argv=None) -> int:
     # baseline was measured on, and every number downstream is then quietly
     # incomparable. A readable cache without them is not a session that may
     # start training.
-    supporting_ok = manifest is not None and splits is not None
+    #
+    # `coverage_ok is not False` rather than `coverage_ok is True`: None means
+    # there was no split file to check, which section 4 has already failed the
+    # run for. Folding None into the failure here would report the same problem
+    # twice and hide which check actually caught it.
+    supporting_ok = (
+        manifest is not None and splits is not None and coverage_ok is not False
+    )
 
     print()
     print("=" * 78)
@@ -466,7 +562,7 @@ def main(argv=None) -> int:
         print()
         print(f"{INFO}{len(npz_paths):,} samples at {subset_dir}")
         print(f"{INFO}Manifest and split CSV both present: the split is READ,")
-        print(f"{INFO}not recomputed.")
+        print(f"{INFO}not recomputed, and it covers every catalog sample.")
         print()
         print("WHAT HAPPENS NEXT")
         print("  1. Run the baseline to confirm the numbers reproduce here:")
