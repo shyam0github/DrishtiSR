@@ -1,0 +1,951 @@
+{
+  "written_utc": "2026-09-10T08:15:33+00:00",
+  "smoke": false,
+  "n_pairs": 1199,
+  "selection_rule": {
+    "metric": "reflectance",
+    "tie_metric": "lpips",
+    "tie_better": "lower",
+    "n_boot": 10000,
+    "ci": 0.95,
+    "provenance": "The rule (consistency first, LPIPS as tie-break) was set by the task before any results. Its two operational choices -- opensr-test `reflectance` as the consistency metric, and a CI-based tie -- were written into configs/base.yaml before any full-split evaluation ran. The training-loop validation logs (a 400-patch AMP subsample, not the selection data) had been read at that point."
+  },
+  "selections": {
+    "runA": {
+      "selected": "it08000",
+      "minimum": "it08000",
+      "tied_set": [
+        "it08000"
+      ],
+      "rows": [
+        {
+          "label": "it08000",
+          "mean_reflectance": 0.0034282493271636876,
+          "mean_lpips": 0.32191763429423237,
+          "delta_vs_min": 0.0,
+          "ci_vs_min": [
+            0.0,
+            0.0
+          ],
+          "tied_with_min": true,
+          "is_min": true,
+          "selected": true
+        },
+        {
+          "label": "it40000",
+          "mean_reflectance": 0.003572745653167565,
+          "mean_lpips": 0.30393679645704763,
+          "delta_vs_min": 0.00014449632600387774,
+          "ci_vs_min": [
+            0.00011968376083093391,
+            0.00017049438363064026
+          ],
+          "tied_with_min": false,
+          "is_min": false,
+          "selected": false
+        }
+      ],
+      "rule": {
+        "metric": "reflectance",
+        "metric_better": "lower",
+        "tie_metric": "lpips",
+        "tie_better": "lower",
+        "tie_definition": "paired bootstrap 95% CI on (candidate - minimum) of reflectance contains 0 (pair-level, 10000 replicates)"
+      }
+    },
+    "a2": {
+      "selected": "it12000",
+      "minimum": "it12000",
+      "tied_set": [
+        "it12000"
+      ],
+      "rows": [
+        {
+          "label": "it10500",
+          "mean_reflectance": 0.003228073707821296,
+          "mean_lpips": 0.334209772227666,
+          "delta_vs_min": 2.9490777752356954e-05,
+          "ci_vs_min": [
+            2.6419408381960195e-05,
+            3.268860540943012e-05
+          ],
+          "tied_with_min": false,
+          "is_min": false,
+          "selected": false
+        },
+        {
+          "label": "it12000",
+          "mean_reflectance": 0.003198582930068939,
+          "mean_lpips": 0.33220908518498443,
+          "delta_vs_min": 0.0,
+          "ci_vs_min": [
+            0.0,
+            0.0
+          ],
+          "tied_with_min": true,
+          "is_min": true,
+          "selected": true
+        }
+      ],
+      "rule": {
+        "metric": "reflectance",
+        "metric_better": "lower",
+        "tie_metric": "lpips",
+        "tie_better": "lower",
+        "tie_definition": "paired bootstrap 95% CI on (candidate - minimum) of reflectance contains 0 (pair-level, 10000 replicates)"
+      }
+    },
+    "b1": {
+      "selected": "it12000",
+      "minimum": "it12000",
+      "tied_set": [
+        "it12000"
+      ],
+      "rows": [
+        {
+          "label": "it10500",
+          "mean_reflectance": 0.0021519406005977354,
+          "mean_lpips": 0.34614600986552996,
+          "delta_vs_min": 1.7512729192412596e-05,
+          "ci_vs_min": [
+            1.6458091918618615e-05,
+            1.8647126355859518e-05
+          ],
+          "tied_with_min": false,
+          "is_min": false,
+          "selected": false
+        },
+        {
+          "label": "it12000",
+          "mean_reflectance": 0.0021344278714053224,
+          "mean_lpips": 0.3452412750963448,
+          "delta_vs_min": 0.0,
+          "ci_vs_min": [
+            0.0,
+            0.0
+          ],
+          "tied_with_min": true,
+          "is_min": true,
+          "selected": true
+        }
+      ],
+      "rule": {
+        "metric": "reflectance",
+        "metric_better": "lower",
+        "tie_metric": "lpips",
+        "tie_better": "lower",
+        "tie_definition": "paired bootstrap 95% CI on (candidate - minimum) of reflectance contains 0 (pair-level, 10000 replicates)"
+      }
+    },
+    "b2": {
+      "selected": "it12000",
+      "minimum": "it12000",
+      "tied_set": [
+        "it12000"
+      ],
+      "rows": [
+        {
+          "label": "it05500",
+          "mean_reflectance": 0.0016667438607201799,
+          "mean_lpips": 0.3578800686399722,
+          "delta_vs_min": 0.0003224613001634959,
+          "ci_vs_min": [
+            0.000311470399751848,
+            0.0003337346682464542
+          ],
+          "tied_with_min": false,
+          "is_min": false,
+          "selected": false
+        },
+        {
+          "label": "it12000",
+          "mean_reflectance": 0.001344282560556684,
+          "mean_lpips": 0.355787658798287,
+          "delta_vs_min": 0.0,
+          "ci_vs_min": [
+            0.0,
+            0.0
+          ],
+          "tied_with_min": true,
+          "is_min": true,
+          "selected": true
+        }
+      ],
+      "rule": {
+        "metric": "reflectance",
+        "metric_better": "lower",
+        "tie_metric": "lpips",
+        "tie_better": "lower",
+        "tie_definition": "paired bootstrap 95% CI on (candidate - minimum) of reflectance contains 0 (pair-level, 10000 replicates)"
+      }
+    }
+  },
+  "checkpoints": {
+    "runA": [
+      {
+        "label": "it08000",
+        "iteration": 8000,
+        "path": "D:\\SIH\\DrishtiSR\\runs\\runA\\best.pt",
+        "files": [
+          "best.pt"
+        ],
+        "weights_sha256": "cda95c8597c67c9ea1119eaa3e921fb1a80727c049a2904038d025cf40c5bd50",
+        "lambdas": null,
+        "git_sha": null,
+        "config_hash": null
+      },
+      {
+        "label": "it40000",
+        "iteration": 40000,
+        "path": "D:\\SIH\\DrishtiSR\\runs\\runA\\last.pt",
+        "files": [
+          "last.pt"
+        ],
+        "weights_sha256": "32ea059d0d87ca9b6471a029f2b50ef13e94f409bc61fac2243a928f88afcece",
+        "lambdas": null,
+        "git_sha": null,
+        "config_hash": null
+      }
+    ],
+    "a2": [
+      {
+        "label": "it10500",
+        "iteration": 10500,
+        "path": "D:\\SIH\\DrishtiSR\\runs\\day3\\a2\\best.pt",
+        "files": [
+          "best.pt"
+        ],
+        "weights_sha256": "45e09dd8f555666b2fd315ea0692362d0eb43cf281edd79dcae4c20a634e612a",
+        "lambdas": {
+          "spectral_lambda1": 0.0,
+          "spectral_lambda2": 0.0
+        },
+        "git_sha": "fb8659d5e8b2d858b0d16c3f88555d9e5f1cb2ac",
+        "config_hash": "e6082c69bba3086aaf71d0a413e64d621d860e5506da507ce2d76edb92f1fc0a"
+      },
+      {
+        "label": "it12000",
+        "iteration": 12000,
+        "path": "D:\\SIH\\DrishtiSR\\runs\\day3\\a2\\last.pt",
+        "files": [
+          "last.pt"
+        ],
+        "weights_sha256": "83428185fe43b68ae162a7a78c0ac143ce63558cfb8090a5b0ea1e5124e38202",
+        "lambdas": {
+          "spectral_lambda1": 0.0,
+          "spectral_lambda2": 0.0
+        },
+        "git_sha": "fb8659d5e8b2d858b0d16c3f88555d9e5f1cb2ac",
+        "config_hash": "e6082c69bba3086aaf71d0a413e64d621d860e5506da507ce2d76edb92f1fc0a"
+      }
+    ],
+    "b1": [
+      {
+        "label": "it10500",
+        "iteration": 10500,
+        "path": "D:\\SIH\\DrishtiSR\\runs\\day3\\b1\\best.pt",
+        "files": [
+          "best.pt"
+        ],
+        "weights_sha256": "a2db1d69d1af9c6e07b061c7b62369af0ef3eaf80406b0de9e450b1ffc3e11b3",
+        "lambdas": {
+          "spectral_lambda1": 0.1,
+          "spectral_lambda2": 0.02
+        },
+        "git_sha": "fb8659d5e8b2d858b0d16c3f88555d9e5f1cb2ac",
+        "config_hash": "e6082c69bba3086aaf71d0a413e64d621d860e5506da507ce2d76edb92f1fc0a"
+      },
+      {
+        "label": "it12000",
+        "iteration": 12000,
+        "path": "D:\\SIH\\DrishtiSR\\runs\\day3\\b1\\last.pt",
+        "files": [
+          "last.pt"
+        ],
+        "weights_sha256": "7cc5eaadf1cc38e8fd285e55778953408669139c955d10e15a2316a14caa5e97",
+        "lambdas": {
+          "spectral_lambda1": 0.1,
+          "spectral_lambda2": 0.02
+        },
+        "git_sha": "fb8659d5e8b2d858b0d16c3f88555d9e5f1cb2ac",
+        "config_hash": "e6082c69bba3086aaf71d0a413e64d621d860e5506da507ce2d76edb92f1fc0a"
+      }
+    ],
+    "b2": [
+      {
+        "label": "it05500",
+        "iteration": 5500,
+        "path": "D:\\SIH\\DrishtiSR\\runs\\day3\\b2\\best.pt",
+        "files": [
+          "best.pt"
+        ],
+        "weights_sha256": "6a52c5ffc77b4c7ee17c558281fa75f8b345773dc04ba544c24dde9a39b4f3dc",
+        "lambdas": {
+          "spectral_lambda1": 0.3,
+          "spectral_lambda2": 0.06
+        },
+        "git_sha": "fb8659d5e8b2d858b0d16c3f88555d9e5f1cb2ac",
+        "config_hash": "e6082c69bba3086aaf71d0a413e64d621d860e5506da507ce2d76edb92f1fc0a"
+      },
+      {
+        "label": "it12000",
+        "iteration": 12000,
+        "path": "D:\\SIH\\DrishtiSR\\runs\\day3\\b2\\last.pt",
+        "files": [
+          "last.pt"
+        ],
+        "weights_sha256": "29323355999337387057b5b3b2bca46093f7e2ab3c0ae2a7e1aefc3aaf31ffa2",
+        "lambdas": {
+          "spectral_lambda1": 0.3,
+          "spectral_lambda2": 0.06
+        },
+        "git_sha": "fb8659d5e8b2d858b0d16c3f88555d9e5f1cb2ac",
+        "config_hash": "e6082c69bba3086aaf71d0a413e64d621d860e5506da507ce2d76edb92f1fc0a"
+      }
+    ]
+  },
+  "availability": [
+    {
+      "label": "runA",
+      "found": 2,
+      "iterations": [
+        8000,
+        40000
+      ],
+      "scheduled": 16
+    },
+    {
+      "label": "a2",
+      "found": 2,
+      "iterations": [
+        10500,
+        12000
+      ],
+      "scheduled": 12
+    },
+    {
+      "label": "b1",
+      "found": 2,
+      "iterations": [
+        10500,
+        12000
+      ],
+      "scheduled": 12
+    },
+    {
+      "label": "b2",
+      "found": 2,
+      "iterations": [
+        5500,
+        12000
+      ],
+      "scheduled": 12
+    }
+  ],
+  "rows": [
+    {
+      "label": "bicubic",
+      "display": "Bicubic",
+      "checkpoint": "bicubic",
+      "means": {
+        "psnr_mean": 38.47167560902402,
+        "ssim_mean": 0.8824672092012253,
+        "lpips": 0.4033181455803474,
+        "sam_mean_deg": 2.0924552051188567,
+        "ergas": 3.050261062614146,
+        "reflectance": 0.0021704580961115195,
+        "spectral": 0.5151552355120439,
+        "spatial": 0.006195968478371225,
+        "l1_spec": 0.001210044656468084,
+        "sam_spec_deg": 0.2924518684434008
+      },
+      "lambdas": "\u2014",
+      "iters": "\u2014",
+      "params": "0",
+      "n_pairs": 1199
+    },
+    {
+      "label": "runA",
+      "display": "Run A \u00b9",
+      "checkpoint": "it08000",
+      "means": {
+        "psnr_mean": 38.825954517214235,
+        "ssim_mean": 0.8896251111941174,
+        "lpips": 0.32191763429423237,
+        "sam_mean_deg": 2.0219247870656267,
+        "ergas": 2.903640102001267,
+        "reflectance": 0.0034282493271636876,
+        "spectral": 0.9003644765069626,
+        "spatial": 0.023240478049103022,
+        "l1_spec": 0.003114373668223521,
+        "sam_spec_deg": 0.8457046639201202
+      },
+      "lambdas": "\u2014",
+      "iters": "8,000 / 40,000",
+      "params": "1,518,724",
+      "n_pairs": 1199
+    },
+    {
+      "label": "a2",
+      "display": "Run A2 (control)",
+      "checkpoint": "it12000",
+      "means": {
+        "psnr_mean": 38.870799199048015,
+        "ssim_mean": 0.8889012319473033,
+        "lpips": 0.33220908518498443,
+        "sam_mean_deg": 1.9720520591694146,
+        "ergas": 2.8965716923919027,
+        "reflectance": 0.003198582930068939,
+        "spectral": 0.7641632400446877,
+        "spatial": 0.005709370108844821,
+        "l1_spec": 0.0027610914665856393,
+        "sam_spec_deg": 0.6862874175185814
+      },
+      "lambdas": "0 / 0",
+      "iters": "12,000 / 12,000",
+      "params": "855,652",
+      "n_pairs": 1199
+    },
+    {
+      "label": "b1",
+      "display": "Run B (B1)",
+      "checkpoint": "it12000",
+      "means": {
+        "psnr_mean": 38.76536366802908,
+        "ssim_mean": 0.8880835109976348,
+        "lpips": 0.3452412750963448,
+        "sam_mean_deg": 2.043969744009395,
+        "ergas": 2.9332655091293605,
+        "reflectance": 0.0021344278714053224,
+        "spectral": 0.4218829818772116,
+        "spatial": 0.002256999710408515,
+        "l1_spec": 0.0013963996882726043,
+        "sam_spec_deg": 0.21181540736119306
+      },
+      "lambdas": "0.1 / 0.02",
+      "iters": "12,000 / 12,000",
+      "params": "855,652",
+      "n_pairs": 1199
+    }
+  ],
+  "supplementary_rows": [
+    {
+      "label": "b2",
+      "display": "Run B2",
+      "checkpoint": "it12000",
+      "means": {
+        "psnr_mean": 38.55850601592933,
+        "ssim_mean": 0.8864159993605626,
+        "lpips": 0.355787658798287,
+        "sam_mean_deg": 2.10958072757627,
+        "ergas": 3.008020107928341,
+        "reflectance": 0.001344282560556684,
+        "spectral": 0.3358210512841613,
+        "spatial": 0.0011578684236180062,
+        "l1_spec": 0.00020037471055435837,
+        "sam_spec_deg": 0.05230106518846668
+      },
+      "lambdas": "0.3 / 0.06",
+      "iters": "12,000 / 12,000",
+      "params": "855,652",
+      "n_pairs": 1199
+    }
+  ],
+  "floor": {
+    "l1_spec": 0.005733285642895423,
+    "sam_spec_deg": 1.2747580170692454,
+    "reflectance": 0.004782443621845941,
+    "spectral": 1.0911493600906184,
+    "spatial": 0.20271160483385148
+  },
+  "floor_stored_l1_spec": 0.0057332856428954715,
+  "significance": [
+    {
+      "metric": "psnr_mean",
+      "better": "higher",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 38.76536366802908,
+      "mean_control": 38.870799199048015,
+      "mean_delta": -0.10543553101893575,
+      "median_delta": -0.10167152911109412,
+      "frac_treatment_better": 0.06839032527105922,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.10969609058651873,
+        -0.1010769286637761
+      ],
+      "ci_tile": [
+        -0.11311759561990548,
+        -0.09788935886170311
+      ],
+      "p_wilcoxon_pair": 1.302215773934367e-180,
+      "p_wilcoxon_tile": 1.0334389997282113e-48,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "control better"
+    },
+    {
+      "metric": "ssim_mean",
+      "better": "higher",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 0.8880835109976348,
+      "mean_control": 0.8889012319473033,
+      "mean_delta": -0.0008177209496685168,
+      "median_delta": -0.0005517662602740891,
+      "frac_treatment_better": 0.0633861551292744,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.0008695217479023262,
+        -0.0007676260283300612
+      ],
+      "ci_tile": [
+        -0.0009064367481238161,
+        -0.0007305010438025298
+      ],
+      "p_wilcoxon_pair": 8.112698416603083e-171,
+      "p_wilcoxon_tile": 3.452635197933557e-47,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "control better"
+    },
+    {
+      "metric": "lpips",
+      "better": "lower",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 0.3452412750963448,
+      "mean_control": 0.33220908518498443,
+      "mean_delta": 0.01303218991136034,
+      "median_delta": 0.013405010104179382,
+      "frac_treatment_better": 0.14178482068390325,
+      "ci": 0.95,
+      "ci_pair": [
+        0.012373401703090843,
+        0.013686200445774224
+      ],
+      "ci_tile": [
+        0.011848360979341515,
+        0.014214359347145461
+      ],
+      "p_wilcoxon_pair": 1.1137281436347865e-155,
+      "p_wilcoxon_tile": 3.1430653240892876e-43,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "control better"
+    },
+    {
+      "metric": "sam_mean_deg",
+      "better": "lower",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 2.043969744009395,
+      "mean_control": 1.9720520591694146,
+      "mean_delta": 0.07191768483998022,
+      "median_delta": 0.057791310471871915,
+      "frac_treatment_better": 0.03252710592160134,
+      "ci": 0.95,
+      "ci_pair": [
+        0.06702605151786423,
+        0.07649501257766428
+      ],
+      "ci_tile": [
+        0.06428506480331772,
+        0.07928825724436818
+      ],
+      "p_wilcoxon_pair": 7.292448726758168e-185,
+      "p_wilcoxon_tile": 3.9020948069546006e-48,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "control better"
+    },
+    {
+      "metric": "ergas",
+      "better": "lower",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 2.9332655091293605,
+      "mean_control": 2.8965716923919027,
+      "mean_delta": 0.03669381673745735,
+      "median_delta": 0.028146338574907226,
+      "frac_treatment_better": 0.06755629691409508,
+      "ci": 0.95,
+      "ci_pair": [
+        0.03468973655647184,
+        0.03870398310154496
+      ],
+      "ci_tile": [
+        0.03325312315108343,
+        0.04029466110837078
+      ],
+      "p_wilcoxon_pair": 4.53953436454028e-173,
+      "p_wilcoxon_tile": 2.6867739889455973e-47,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "control better"
+    },
+    {
+      "metric": "reflectance",
+      "better": "lower",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 0.0021344278714053224,
+      "mean_control": 0.003198582930068939,
+      "mean_delta": -0.0010641550586636163,
+      "median_delta": -0.0009016399271786,
+      "frac_treatment_better": 1.0,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.001100329679989906,
+        -0.0010288417275510144
+      ],
+      "ci_tile": [
+        -0.0011301458526752435,
+        -0.000999883933559127
+      ],
+      "p_wilcoxon_pair": 1.1840641366232567e-197,
+      "p_wilcoxon_tile": 6.083559849691438e-51,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "treatment better"
+    },
+    {
+      "metric": "spectral",
+      "better": "lower",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 0.4218829818772116,
+      "mean_control": 0.7641632400446877,
+      "mean_delta": -0.34228025816747604,
+      "median_delta": -0.28516682982444763,
+      "frac_treatment_better": 1.0,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.354245453006786,
+        -0.3308898419669959
+      ],
+      "ci_tile": [
+        -0.3625959791000164,
+        -0.3220662320709122
+      ],
+      "p_wilcoxon_pair": 1.1840641366232567e-197,
+      "p_wilcoxon_tile": 6.083559849691438e-51,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "treatment better"
+    },
+    {
+      "metric": "spatial",
+      "better": "lower",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 0.002256999710408515,
+      "mean_control": 0.005709370108844821,
+      "mean_delta": -0.0034523703984363063,
+      "median_delta": 0.0,
+      "frac_treatment_better": 0.195162635529608,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.003936109575578889,
+        -0.0029673238587041325
+      ],
+      "ci_tile": [
+        -0.003967477537470984,
+        -0.0029437377568890793
+      ],
+      "p_wilcoxon_pair": 1.7798932827781377e-34,
+      "p_wilcoxon_tile": 2.79912319100062e-26,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "treatment better"
+    },
+    {
+      "metric": "l1_spec",
+      "better": "lower",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 0.0013963996882726043,
+      "mean_control": 0.0027610914665856393,
+      "mean_delta": -0.0013646917783130346,
+      "median_delta": -0.0011408505961298,
+      "frac_treatment_better": 1.0,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.0014100146975133988,
+        -0.0013198209134583929
+      ],
+      "ci_tile": [
+        -0.0014478272169535938,
+        -0.0012828177596523865
+      ],
+      "p_wilcoxon_pair": 1.1840641366232567e-197,
+      "p_wilcoxon_tile": 6.083559849691438e-51,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "treatment better"
+    },
+    {
+      "metric": "sam_spec_deg",
+      "better": "lower",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 0.21181540736119306,
+      "mean_control": 0.6862874175185814,
+      "mean_delta": -0.4744720101573884,
+      "median_delta": -0.40366434003031226,
+      "frac_treatment_better": 1.0,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.4896992476026151,
+        -0.4597652479622017
+      ],
+      "ci_tile": [
+        -0.5019035159968159,
+        -0.4473616918969038
+      ],
+      "p_wilcoxon_pair": 1.1840641366232567e-197,
+      "p_wilcoxon_tile": 6.083559849691438e-51,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "treatment better"
+    },
+    {
+      "metric": "synthesis",
+      "better": "higher",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 0.0037639888802160626,
+      "mean_control": 0.004054270413633484,
+      "mean_delta": -0.0002902815334174203,
+      "median_delta": -0.0002291486598551,
+      "frac_treatment_better": 0.045871559633027525,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.00032650799603698273,
+        -0.00025422641940062797
+      ],
+      "ci_tile": [
+        -0.0003332601855401374,
+        -0.0002487927858438701
+      ],
+      "p_wilcoxon_pair": 2.3757481044564548e-155,
+      "p_wilcoxon_tile": 4.286021648880908e-39,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "control better"
+    },
+    {
+      "metric": "ha_metric",
+      "better": "lower",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 0.11607957040709287,
+      "mean_control": 0.12832151947106488,
+      "mean_delta": -0.012241949063972,
+      "median_delta": -0.011637300252914401,
+      "frac_treatment_better": 0.9382819015846539,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.014016674900873315,
+        -0.01049382526946376
+      ],
+      "ci_tile": [
+        -0.013998877338599156,
+        -0.010413006786101681
+      ],
+      "p_wilcoxon_pair": 2.269486595812429e-146,
+      "p_wilcoxon_tile": 3.994537647668869e-34,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "treatment better"
+    },
+    {
+      "metric": "om_metric",
+      "better": "lower",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 0.7782760128764136,
+      "mean_control": 0.7525003133364973,
+      "mean_delta": 0.02577569953991633,
+      "median_delta": 0.024353206157684326,
+      "frac_treatment_better": 0.05004170141784821,
+      "ci": 0.95,
+      "ci_pair": [
+        0.023236601210639713,
+        0.02830048817659637
+      ],
+      "ci_tile": [
+        0.02296814469432612,
+        0.028493419393649532
+      ],
+      "p_wilcoxon_pair": 3.6299019818457995e-158,
+      "p_wilcoxon_tile": 1.2761891766394418e-39,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "control better"
+    },
+    {
+      "metric": "im_metric",
+      "better": "higher",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 0.10564441792200857,
+      "mean_control": 0.11917816910945539,
+      "mean_delta": -0.013533751187446819,
+      "median_delta": -0.0121801793575287,
+      "frac_treatment_better": 0.04420350291909925,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.014456552192118265,
+        -0.012606029593781123
+      ],
+      "ci_tile": [
+        -0.014712899550265121,
+        -0.012335236320422778
+      ],
+      "p_wilcoxon_pair": 3.6612722698451545e-168,
+      "p_wilcoxon_tile": 8.694433288130397e-44,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "control better"
+    }
+  ],
+  "matched_iterations": [
+    {
+      "iteration": "it10500",
+      "metric": "psnr_mean",
+      "better": "higher",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 38.767649928008176,
+      "mean_control": 38.86863830723706,
+      "mean_delta": -0.10098837922887888,
+      "median_delta": -0.09428442321330621,
+      "frac_treatment_better": 0.0725604670558799,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.10516765097346811,
+        -0.09678259599558724
+      ],
+      "ci_tile": [
+        -0.1083928001099835,
+        -0.09379063810659481
+      ],
+      "p_wilcoxon_pair": 4.568444058565498e-180,
+      "p_wilcoxon_tile": 1.0436154366289858e-48,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "control better"
+    },
+    {
+      "iteration": "it10500",
+      "metric": "reflectance",
+      "better": "lower",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 0.0021519406005977354,
+      "mean_control": 0.003228073707821296,
+      "mean_delta": -0.0010761331072235607,
+      "median_delta": -0.0009128978708757998,
+      "frac_treatment_better": 1.0,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.0011119518746543296,
+        -0.0010408536808621965
+      ],
+      "ci_tile": [
+        -0.0011410109604969023,
+        -0.0010130906450340272
+      ],
+      "p_wilcoxon_pair": 1.1840641366232567e-197,
+      "p_wilcoxon_tile": 6.083559849691438e-51,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "treatment better"
+    },
+    {
+      "iteration": "it12000",
+      "metric": "psnr_mean",
+      "better": "higher",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 38.76536366802908,
+      "mean_control": 38.870799199048015,
+      "mean_delta": -0.10543553101893575,
+      "median_delta": -0.10167152911109412,
+      "frac_treatment_better": 0.06839032527105922,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.10969609058651873,
+        -0.1010769286637761
+      ],
+      "ci_tile": [
+        -0.11311759561990548,
+        -0.09788935886170311
+      ],
+      "p_wilcoxon_pair": 1.302215773934367e-180,
+      "p_wilcoxon_tile": 1.0334389997282113e-48,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "control better"
+    },
+    {
+      "iteration": "it12000",
+      "metric": "reflectance",
+      "better": "lower",
+      "n": 1199,
+      "n_dropped_nonfinite": 0,
+      "n_clusters": 300,
+      "mean_treatment": 0.0021344278714053224,
+      "mean_control": 0.003198582930068939,
+      "mean_delta": -0.0010641550586636163,
+      "median_delta": -0.0009016399271786,
+      "frac_treatment_better": 1.0,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.001100329679989906,
+        -0.0010288417275510144
+      ],
+      "ci_tile": [
+        -0.0011301458526752435,
+        -0.000999883933559127
+      ],
+      "p_wilcoxon_pair": 1.1840641366232567e-197,
+      "p_wilcoxon_tile": 6.083559849691438e-51,
+      "straddles_zero_pair": false,
+      "straddles_zero_tile": false,
+      "verdict": "treatment better"
+    }
+  ],
+  "reading": [
+    "Run B lowers opensr-test's consistency error (`reflectance`) from 0.00320 to 0.00213 (-33.3%); the tile-clustered 95% CI on the per-pair mean delta is [-0.00113, -0.001], and the CI excludes zero, so this consistency gain is resolved, not noise.",
+    "B costs 0.105 dB PSNR against A2 (tile CI [-0.113, -0.0979] dB, resolved), and moves LPIPS by +0.0130 (resolved)."
+  ],
+  "below_floor": [
+    "Run A \u00b9",
+    "Run A2 (control)",
+    "Run B (B1)",
+    "Run B2"
+  ],
+  "figure": "D:\\SIH\\DrishtiSR\\reports\\figures\\day3_consistency_vs_iter.png",
+  "fingerprint": "92ee4b4d79244e8fa544994f5d9e6b7ba65c51535559c74a3e21626614d4b122",
+  "oracle_opensr_skipped": 0
+}

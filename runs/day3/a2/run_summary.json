@@ -1,0 +1,37 @@
+{
+  "config_hash": "e6082c69bba3086aaf71d0a413e64d621d860e5506da507ce2d76edb92f1fc0a",
+  "git_sha": "fb8659d5e8b2d858b0d16c3f88555d9e5f1cb2ac",
+  "git_dirty": false,
+  "lambdas": {
+    "spectral_lambda1": 0.0,
+    "spectral_lambda2": 0.0
+  },
+  "spectral_downsample": "area",
+  "iters_requested": 12000,
+  "iters_completed": 12000,
+  "best_val_psnr": 35.30344363965273,
+  "elapsed_min": 55.15662252108256,
+  "final_val": {
+    "psnr": 35.29833523936885,
+    "l1_spec": 0.0030715227080509067,
+    "sam_spec": 0.013553098514676095,
+    "sam_valid_frac": 0.9998504638671875,
+    "sharpness": 0.03441001795232296,
+    "hf_energy": 0.01399792604148388,
+    "ssim": 0.8345325214098268,
+    "lpips": 0.37943614268442616,
+    "sam_hr": 2.8652816518420003,
+    "ergas": 4.092372533722058,
+    "n_val_batches": 25.0,
+    "n_metric_batches": 4.0
+  },
+  "sharpness_reference": {
+    "hr_sharpness": 0.07670601591467857,
+    "hr_hf_energy": 0.18746865719556807,
+    "bicubic_sharpness": 0.03382019355893135,
+    "bicubic_hf_energy": 0.009843620844185353,
+    "n_batches": 25.0,
+    "hf_cutoff": 0.25
+  },
+  "finished_utc": "2026-09-09T12:05:09+00:00"
+}

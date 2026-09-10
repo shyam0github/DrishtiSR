@@ -1035,6 +1035,35 @@ smoke:
     report_json: outputs/metrics/day2_runA_smoke.json
     curves_figure: outputs/figures/day2_curves_smoke.png
     per_sample_csv_name: "day2_runA_smoke_{method}.csv"
+  eval_all_ckpts:
+    # Same reasoning as eval_runA above: FABRICATE run directories of tiny
+    # random-weight checkpoints in the real format, then score them through the
+    # ordinary path. Separate run dirs, cache and report paths, so stub numbers
+    # can never land where the real table lives.
+    fabricate_runs: true
+    runs:
+      - {label: bicubic, kind: baseline, method: bicubic, display: Bicubic}
+      - {label: runA, kind: run, run_dir: outputs/eval_all_ckpts_smoke/runA, display: Run A}
+      - {label: a2, kind: run, run_dir: outputs/eval_all_ckpts_smoke/a2, display: Run A2 (control)}
+      - {label: b1, kind: run, run_dir: outputs/eval_all_ckpts_smoke/b1, display: Run B (B1)}
+      - {label: b2, kind: run, run_dir: outputs/eval_all_ckpts_smoke/b2, display: Run B2}
+    cache_dir: outputs/metrics/eval_all_ckpts_smoke
+    # LPIPS is off in smoke (no network), so the tie-break needs another column.
+    selection: {tie_metric: ssim_mean, tie_better: higher, n_boot: 200}
+    significance:
+      n_boot: 200
+      # No `spatial`: MEASURED, satalign rejects the translation on nearly every
+      # stub patch scored by a random-weight model, leaving no finite pair, and
+      # compare_paired rightly refuses to test nothing. On real data an
+      # all-NaN spatial column would be a genuine failure and must stay loud.
+      metrics:
+        - {name: psnr_mean, better: higher}
+        - {name: ssim_mean, better: higher}
+        - {name: reflectance, better: lower}
+        - {name: l1_spec, better: lower}
+    figure: {path: outputs/figures/day3_consistency_vs_iter_smoke.png}
+    report_md: outputs/metrics/day3_results_smoke.md
+    report_json: outputs/metrics/day3_results_smoke.json
   train:
     batch_size: 2
     num_workers: 0
@@ -1471,6 +1500,128 @@ eval_runA:
   # per-100-iteration loss is noisy enough to hide the trend; the raw trace is
   # drawn underneath at low alpha so the smoothing cannot conceal anything.
   curves_loss_smooth: 9
+
+# Day 3 task 6 -- the headline table (scripts/eval_all_ckpts.py). Every
+# checkpoint of every run scored on the FULL validation split; ONE checkpoint per
+# run chosen post hoc by the rule below; Run B minus Run A2 tested per pair.
+#
+# WHY NOT best.pt. The training loop picks best.pt on PSNR over a 25-batch AMP
+# subsample, and PSNR is the metric the spectral loss is expected to COST. A
+# table built from best.pt would select each run on the very quantity the
+# comparison is trying to measure, favouring the control by construction.
+eval_all_ckpts:
+  # One entry per table row. kind: baseline (no weights) or run (a directory of
+  # src/train.py checkpoints, every file matching checkpoint_glob scored).
+  runs:
+    - label: bicubic
+      kind: baseline
+      method: bicubic
+      display: Bicubic
+    - label: runA
+      kind: run
+      run_dir: runs/runA
+      display: Run A
+    - label: a2
+      kind: run
+      run_dir: runs/day3/a2
+      display: Run A2 (control)
+    - label: b1
+      kind: run
+      run_dir: runs/day3/b1
+      display: Run B (B1)
+    - label: b2
+      kind: run
+      run_dir: runs/day3/b2
+      display: Run B2
+  # The four rows asked for, in order, and the supplementary row printed below
+  # them. B2 is scored because it ran, but B1 is "the primary result" in
+  # scripts/day3_runs.py::RUN_PLAN, declared before training -- B2 must not
+  # become "Run B" because it happened to score better.
+  table_rows: [bicubic, runA, a2, b1]
+  supplementary_rows: [b2]
+  control: a2
+  treatment: b1
+  # The HR-in-place-of-SR pass that gives the spectral floor in BOTH consistency
+  # conventions (opensr-test's and our D=area one).
+  oracle_label: hr_oracle
+  checkpoint_glob: "*.pt"
+  # Per-pair results, one directory per checkpoint, keyed on the WEIGHTS hash
+  # and a fingerprint of every metric setting. A stale key is recomputed, never
+  # silently reused.
+  cache_dir: outputs/metrics/eval_all_ckpts
+
+  # THE SELECTION RULE. Written here on 2026-09-10 BEFORE any full-split number
+  # for A2 or B existed, and applied identically to every run (Run A included):
+  #   1. the checkpoint with the lowest mean `metric` (consistency error) is the
+  #      minimum;
+  #   2. any checkpoint whose paired bootstrap CI on (candidate - minimum)
+  #      contains 0 is TIED with it -- an exact tie never occurs on a continuous
+  #      metric, so without this the LPIPS tie-break would be a rule that can
+  #      never fire;
+  #   3. the tied checkpoint with the best `tie_metric` is selected.
+  # `metric` is opensr-test's `reflectance`: L1 between the LR and the SR
+  # downsampled back to 10 m, computed by the third-party implementation. It is
+  # the direct statement of contribution 1 ("degrading the SR output back to
+  # 10 m must reproduce the input reflectance").
+  selection:
+    metric: reflectance
+    tie_metric: lpips
+    tie_better: lower
+    n_boot: 10000
+    ci: 0.95
+    # Printed into the report verbatim, so the provenance of the rule travels
+    # with the numbers it chose.
+    provenance: >-
+      The rule (consistency first, LPIPS as tie-break) was set by the task
+      before any results. Its two operational choices -- opensr-test
+      `reflectance` as the consistency metric, and a CI-based tie -- were
+      written into configs/base.yaml before any full-split evaluation ran. The
+      training-loop validation logs (a 400-patch AMP subsample, not the
+      selection data) had been read at that point.
+
+  # B - A2, per pair, over all validation patches. Every metric is reported
+  # with a pair-level AND a tile-clustered bootstrap CI (patches from one tile
+  # are correlated; see src/eval/ckpt_selection.py). Verdicts use the tile CI.
+  significance:
+    n_boot: 10000
+    ci: 0.95
+    metrics:
+      - {name: psnr_mean, better: higher}
+      - {name: ssim_mean, better: higher}
+      - {name: lpips, better: lower}
+      - {name: sam_mean_deg, better: lower}
+      - {name: ergas, better: lower}
+      - {name: reflectance, better: lower}
+      - {name: spectral, better: lower}
+      - {name: spatial, better: lower}
+      - {name: l1_spec, better: lower}
+      - {name: sam_spec_deg, better: lower}
+      - {name: synthesis, better: higher}
+      - {name: ha_metric, better: lower}
+      - {name: om_metric, better: lower}
+      - {name: im_metric, better: higher}
+
+  # Consistency vs iteration. The dense curve is the training loop's own
+  # validation (log.csv, every --val-every, on the --val-batches subsample);
+  # full-split points are overlaid at the checkpoints that exist. Colours are
+  # the first two categorical slots of the dataviz reference palette, validated
+  # on the light surface (worst CVD dE 24.7).
+  figure:
+    path: reports/figures/day3_consistency_vs_iter.png
+    runs: [a2, b1]
+    log_column: val_l1_spec
+    eval_column: l1_spec
+    colors: {a2: "#2a78d6", b1: "#eb6834"}
+    surface: "#fcfcfb"
+    ink: "#0b0b0b"
+    ink_secondary: "#52514e"
+    muted: "#898781"
+    dpi: 150
+
+  report_md: reports/day3_results.md
+  report_json: reports/day3_results.json
+  # Smoke only: write tiny random-weight run directories to score.
+  fabricate_runs: false
 
 # Publishing the Run A checkpoint to the Hugging Face Hub, read by
 # scripts/push_to_hf.py.

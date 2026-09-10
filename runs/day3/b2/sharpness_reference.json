@@ -1,0 +1,8 @@
+{
+  "hr_sharpness": 0.07670601591467857,
+  "hr_hf_energy": 0.18746865719556807,
+  "bicubic_sharpness": 0.03382019355893135,
+  "bicubic_hf_energy": 0.009843620844185353,
+  "n_batches": 25.0,
+  "hf_cutoff": 0.25
+}
