@@ -1,3 +1,5 @@
+> Current state lives in [`PROJECT_STATE.md`](../PROJECT_STATE.md); this file is the dated, append-only log.
+
 # DrishtiSR — progress and handoff log
 
 SIH 2026, problem statement **SIH26142**: Sentinel-2 super-resolution 10 m → 2.5 m (x4).

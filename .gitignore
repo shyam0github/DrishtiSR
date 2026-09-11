@@ -12,6 +12,8 @@
 *.ckpt
 *.onnx
 checkpoints/
+# ...except the checkpoint REPORTS (markdown), which are write-ups, not weights.
+!reports/checkpoints/
 
 # Python
 __pycache__/

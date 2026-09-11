@@ -1,5 +1,7 @@
 # DrishtiSR — working agreement
 
+**Every session: read `PROJECT_STATE.md` (repo root, current state) first.**
+
 Smart India Hackathon 2026, problem statement **SIH26142**: deep-learning
 super-resolution of Sentinel-2 imagery from 10 m to 2.5 m (x4).
 
