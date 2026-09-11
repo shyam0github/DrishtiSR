@@ -1,0 +1,37 @@
+{
+  "name": "drishtisr-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "placeholders": "node scripts/make_placeholders.mjs",
+    "fixtures:metrics": "node scripts/snapshot_metrics.mjs",
+    "predev": "npm run placeholders",
+    "dev": "vite",
+    "dev:lan": "npm run placeholders && vite --host",
+    "prebuild": "npm run placeholders",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "test:e2e": "npm run placeholders && node scripts/e2e_swipe.mjs"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.9.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.20.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "playwright-core": "^1.63.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.9",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0",
+    "yaml": "^2.9.0"
+  }
+}

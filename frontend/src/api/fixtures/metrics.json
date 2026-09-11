@@ -1,0 +1,132 @@
+{
+  "source": "reports/day3_results.json",
+  "written_utc": "2026-09-10T08:15:33+00:00",
+  "fingerprint": "92ee4b4d79244e8fa544994f5d9e6b7ba65c51535559c74a3e21626614d4b122",
+  "n_pairs": 1199,
+  "reading": [
+    "Run B lowers opensr-test's consistency error (`reflectance`) from 0.00320 to 0.00213 (-33.3%); the tile-clustered 95% CI on the per-pair mean delta is [-0.00113, -0.001], and the CI excludes zero, so this consistency gain is resolved, not noise.",
+    "B costs 0.105 dB PSNR against A2 (tile CI [-0.113, -0.0979] dB, resolved), and moves LPIPS by +0.0130 (resolved)."
+  ],
+  "rows": [
+    {
+      "label": "bicubic",
+      "display": "Bicubic",
+      "checkpoint": "bicubic",
+      "means": {
+        "psnr_mean": 38.47167560902402,
+        "ssim_mean": 0.8824672092012253,
+        "lpips": 0.4033181455803474,
+        "sam_mean_deg": 2.0924552051188567,
+        "ergas": 3.050261062614146,
+        "reflectance": 0.0021704580961115195,
+        "spectral": 0.5151552355120439,
+        "spatial": 0.006195968478371225,
+        "l1_spec": 0.001210044656468084,
+        "sam_spec_deg": 0.2924518684434008
+      },
+      "lambdas": "—",
+      "iters": "—",
+      "params": "0",
+      "n_pairs": 1199
+    },
+    {
+      "label": "runA",
+      "display": "Run A ¹",
+      "checkpoint": "it08000",
+      "means": {
+        "psnr_mean": 38.825954517214235,
+        "ssim_mean": 0.8896251111941174,
+        "lpips": 0.32191763429423237,
+        "sam_mean_deg": 2.0219247870656267,
+        "ergas": 2.903640102001267,
+        "reflectance": 0.0034282493271636876,
+        "spectral": 0.9003644765069626,
+        "spatial": 0.023240478049103022,
+        "l1_spec": 0.003114373668223521,
+        "sam_spec_deg": 0.8457046639201202
+      },
+      "lambdas": "—",
+      "iters": "8,000 / 40,000",
+      "params": "1,518,724",
+      "n_pairs": 1199
+    },
+    {
+      "label": "a2",
+      "display": "Run A2 (control)",
+      "checkpoint": "it12000",
+      "means": {
+        "psnr_mean": 38.870799199048015,
+        "ssim_mean": 0.8889012319473033,
+        "lpips": 0.33220908518498443,
+        "sam_mean_deg": 1.9720520591694146,
+        "ergas": 2.8965716923919027,
+        "reflectance": 0.003198582930068939,
+        "spectral": 0.7641632400446877,
+        "spatial": 0.005709370108844821,
+        "l1_spec": 0.0027610914665856393,
+        "sam_spec_deg": 0.6862874175185814
+      },
+      "lambdas": "0 / 0",
+      "iters": "12,000 / 12,000",
+      "params": "855,652",
+      "n_pairs": 1199
+    },
+    {
+      "label": "b1",
+      "display": "Run B (B1)",
+      "checkpoint": "it12000",
+      "means": {
+        "psnr_mean": 38.76536366802908,
+        "ssim_mean": 0.8880835109976348,
+        "lpips": 0.3452412750963448,
+        "sam_mean_deg": 2.043969744009395,
+        "ergas": 2.9332655091293605,
+        "reflectance": 0.0021344278714053224,
+        "spectral": 0.4218829818772116,
+        "spatial": 0.002256999710408515,
+        "l1_spec": 0.0013963996882726043,
+        "sam_spec_deg": 0.21181540736119306
+      },
+      "lambdas": "0.1 / 0.02",
+      "iters": "12,000 / 12,000",
+      "params": "855,652",
+      "n_pairs": 1199
+    }
+  ],
+  "supplementary_rows": [
+    {
+      "label": "b2",
+      "display": "Run B2",
+      "checkpoint": "it12000",
+      "means": {
+        "psnr_mean": 38.55850601592933,
+        "ssim_mean": 0.8864159993605626,
+        "lpips": 0.355787658798287,
+        "sam_mean_deg": 2.10958072757627,
+        "ergas": 3.008020107928341,
+        "reflectance": 0.001344282560556684,
+        "spectral": 0.3358210512841613,
+        "spatial": 0.0011578684236180062,
+        "l1_spec": 0.00020037471055435837,
+        "sam_spec_deg": 0.05230106518846668
+      },
+      "lambdas": "0.3 / 0.06",
+      "iters": "12,000 / 12,000",
+      "params": "855,652",
+      "n_pairs": 1199
+    }
+  ],
+  "floor": {
+    "l1_spec": 0.005733285642895423,
+    "sam_spec_deg": 1.2747580170692454,
+    "reflectance": 0.004782443621845941,
+    "spectral": 1.0911493600906184,
+    "spatial": 0.20271160483385148
+  },
+  "below_floor": [
+    "Run A ¹",
+    "Run A2 (control)",
+    "Run B (B1)",
+    "Run B2"
+  ]
+}

@@ -1855,3 +1855,60 @@ smoke_view:
   figure_dpi: 140
   out_crop: outputs/day2_smoke.png
   out_full: outputs/day2_smoke_full.png
+
+# ---------------------------------------------------------------------------
+# frontend/ -- the demo UI (Vite + React + MapLibre).
+#
+# frontend/scripts/repo-config.mjs reads THIS block (plus sr.scale,
+# dataset.bands, runtime.max_parameters and seed) and vite.config.ts bakes it
+# into the bundle. Nothing under frontend/src hardcodes a centre, a GSD or a
+# budget. Every key is required; a missing one stops `npm run dev` rather than
+# falling back to a default.
+frontend:
+  map:
+    center_lonlat: [77.21, 28.61]   # WGS84 [lon, lat] -- central New Delhi
+    zoom: 11
+    # Free raster basemap. OpenStreetMap's standard tiles: attribution is
+    # mandatory under the OSMF tile usage policy, and bulk or heavy use is not
+    # permitted. Fine for a demo; move to a keyed provider before any public
+    # deployment.
+    basemap:
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"]
+      tile_size: 256
+      max_zoom: 19
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+
+  # Ground sample distance of the INPUT, metres (Sentinel-2 10 m bands). The
+  # output GSD is this divided by sr.scale and is never restated here.
+  lr_gsd_m: 10.0
+
+  # The AOI tile budget, so a judge cannot select all of India and hang the demo.
+  # lr_px and overlap_lr_px MIRROR the CLI defaults of src/infer/tiled.py
+  # (--tile 256 --overlap 32). That script does not read them from config yet,
+  # so if its defaults change, change these. Tiles per axis are counted exactly
+  # as sr_array enumerates them: len(range(0, max(1, n - overlap), tile - overlap)).
+  #
+  # max_tiles = 36 is delhi.aois[A] (about 12.7 x 12.2 km, i.e. 6 x 6 tiles), the
+  # largest AOI the demo is meant to show. It is NOT derived from a latency
+  # measurement: the INT8 CPU benchmark does not exist yet. When it does, set
+  # budget = acceptable wait / measured seconds per tile.
+  #
+  # The UI refuses to submit an over-budget AOI, but that is a courtesy, not a
+  # guard: anyone can POST a bbox. The Day 4 API must enforce max_tiles itself.
+  tile:
+    lr_px: 256
+    overlap_lr_px: 32
+    max_tiles: 36
+
+  # Bytes per band of the SR raster, for the output-size estimate shown next
+  # to the pixel dimensions. 2 = uint16, tiled.py's --out-dtype default.
+  output_bytes_per_band: 2
+
+  # Procedural placeholder imagery for the swipe slider (MOCK_MODE only),
+  # written by frontend/scripts/make_placeholders.mjs (gitignored). The 2.5 m
+  # image is hr_px square; the 10 m image is its exact sr.scale x sr.scale
+  # block mean -- the 'area' operator the spectral loss trains on. So the pair
+  # shows what a 4x GSD change looks like, NOT what the network achieves.
+  # Seeded from the top-level `seed`.
+  placeholder:
+    hr_px: 1024

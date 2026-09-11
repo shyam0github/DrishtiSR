@@ -52,6 +52,7 @@ notebooks/templates/  Sources for generated notebooks. Never edit a generated on
 docs/          Operational guides, e.g. kaggle_workflow.md.
 tests/         pytest. Runs on CPU, no data required.
 reports/       Write-ups and submission material.
+frontend/      Demo UI: Vite + React + MapLibre. See frontend/README.md.
 outputs/       Gitignored: figures/, metrics/, checkpoints/, cache/, run.log.
 ```
 
@@ -200,6 +201,25 @@ run), and every GPU job runs the data-root check before the expensive work and
 aborts if the mount is unreadable. GPU jobs pin a **T4**, never a P100: the
 default image's cu128 PyTorch has no Pascal `sm_60` kernels, so a P100 session
 reports `cuda.is_available() == True` and then dies on the first CUDA op.
+
+**Demo UI skeleton, mocked end to end.** `frontend/` (Vite + React + MapLibre)
+has the swipe comparison, an AOI picker with a tile budget, the uncertainty
+overlay, and the Day 3 metrics table. All of it runs against fixtures behind one
+typed client (`src/api/client.ts`, `MOCK_MODE`); Day 4 points that client at
+FastAPI and changes nothing else. `npm run test:e2e` drives a real Chrome with a
+mouse on a desktop viewport and with touch on a phone viewport, then reads back
+the painted pixels. The 2.5 m side of the swipe carries **2.25×** the fine
+detail of the 10 m side. That check exists because the first version passed on
+DOM state over a blank map. Every SR view carries a non-dismissible
+"AI-RECONSTRUCTED — NOT MEASURED DATA" badge.
+
+Caveats, stated:
+- The imagery is a procedural placeholder. Its 10 m layer is the exact 4×4
+  block mean of the 2.5 m one, so it shows what 4× GSD means, not what the model
+  does.
+- The σ layer is an edge map, not the model's σ. Both are labelled on screen.
+- The 36-tile AOI budget is sized to Delhi AOI A, not to a measured latency: the
+  INT8 CPU benchmark does not exist yet.
 
 **Next:** SR backbone + heteroscedastic uncertainty head under the 1M-parameter
 budget, then ONNX export and INT8 CPU benchmarking.

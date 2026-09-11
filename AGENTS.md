@@ -158,6 +158,9 @@ notebooks/templates/  Sources for GENERATED notebooks. Edit these, never a
 docs/          Operational guides, e.g. kaggle_workflow.md.
 tests/         pytest. Runs on CPU, no data required.
 reports/       Write-ups and submission material.
+frontend/      Demo UI (Vite + React + MapLibre). Reads the `frontend:` block of
+               configs/base.yaml; all network calls go through
+               src/api/client.ts. See frontend/README.md.
 outputs/       Gitignored: figures/, metrics/, checkpoints/, run.log.
 ```
 
