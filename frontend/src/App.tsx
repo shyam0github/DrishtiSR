@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Map as MlMap } from "maplibre-gl";
 import { DEMO_AOI, MOCK_MODE, runSr, type SrResponse } from "./api/client";
 import { AoiPicker } from "./components/AoiPicker";
+import { BackendBadge } from "./components/BackendBadge";
 import { MapView } from "./components/MapView";
 import { MetricsPanel } from "./components/MetricsPanel";
 import { SwipeSlider } from "./components/SwipeSlider";
@@ -84,6 +85,12 @@ export default function App() {
       <aside className="min-h-0 flex-1 space-y-5 overflow-y-auto p-3 text-sm md:order-1 md:w-[30rem] md:flex-none md:border-r md:border-slate-200">
         <header className="space-y-1">
           <h1 className="text-base font-bold">DrishtiSR · Sentinel-2 10 m → 2.5 m</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <span data-testid="ai-label" className="rounded bg-amber-300 px-1.5 py-0.5 text-[11px] font-bold text-black ring-1 ring-black">
+              AI-reconstructed imagery
+            </span>
+            <BackendBadge />
+          </div>
           {MOCK_MODE && (
             <p data-testid="mock-banner" className="rounded bg-slate-800 px-2 py-1 text-xs text-white">
               MOCK MODE: fixtures and placeholder imagery. No model runs.
@@ -91,18 +98,39 @@ export default function App() {
           )}
         </header>
 
-        {baseMap && <AoiPicker map={baseMap} renderOn={renderOn} bbox={bbox} onChange={setBbox} onRun={(b) => void run(b)} running={running} />}
+        {baseMap && (
+          <AoiPicker
+            map={baseMap}
+            renderOn={renderOn}
+            bbox={bbox}
+            onChange={setBbox}
+            onRun={(b) => void run(b)}
+            running={running}
+            runStatus={
+              <>
+                {error && (
+                  <div role="alert" data-testid="sr-error" className="rounded border border-red-600 bg-red-50 p-2 text-xs text-red-800">
+                    Super-resolution request failed: {error}
+                  </div>
+                )}
+                {result && (
+                  <p data-testid="provenance" data-request-id={result.request_id} className="text-xs text-slate-600">
+                    {result.provenance.note}
+                  </p>
+                )}
+              </>
+            }
+          />
+        )}
 
-        {error && (
-          <div role="alert" data-testid="sr-error" className="rounded border border-red-600 bg-red-50 p-2 text-xs text-red-800">
-            Super-resolution request failed: {error}
-          </div>
-        )}
-        {result && (
-          <p data-testid="provenance" data-request-id={result.request_id} className="text-xs text-slate-600">
-            {result.provenance.note}
+        <section className="space-y-1" data-testid="compare">
+          <h2 className="font-semibold">Compare</h2>
+          <p className="text-xs text-slate-600">
+            {result
+              ? `Drag the divider on the map: left ${result.layers.lr.label}, right ${result.layers.sr.label}.`
+              : "The swipe view appears on the map once a result is loaded."}
           </p>
-        )}
+        </section>
 
         <UncertaintyToggle
           layer={result?.layers.uncertainty ?? null}

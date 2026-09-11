@@ -35,11 +35,13 @@ response types are the wire format (snake_case):
 
 | endpoint | request | response |
 |---|---|---|
-| `POST /api/sr` | `SrRequest { bbox }` | `SrResponse` (lr / sr / uncertainty layers + provenance) |
-| `GET /api/metrics` | — | `MetricsResponse` (a subset of `day3_results.json`) |
+| `GET /health` | — | any JSON with HTTP 200; drives the "Backend: online/offline" badge, probed once per load even in MOCK_MODE |
+| `POST /sr` | `SrRequest { bbox }` | `SrResponse` (lr / sr / uncertainty layers + provenance) |
+| `GET /metrics` | — | `MetricsResponse` (a subset of `day3_results.json`) |
 
-Switch to the live backend with `VITE_MOCK_MODE=false` (and `VITE_API_BASE` if
-it is not served at `/api`). **The backend must enforce
+Paths are relative to `VITE_API_BASE`, default `http://localhost:8000` (the
+backend must allow CORS from the dev origin). Switch to the live backend with
+`VITE_MOCK_MODE=false`. **The backend must enforce
 `frontend.tile.max_tiles` itself, and answer 413 the way the mock does.** The
 UI's check only protects the judge from a mistake; it is not a guard.
 

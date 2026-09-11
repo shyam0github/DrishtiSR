@@ -7,6 +7,7 @@
  * same two endpoints in FastAPI and sets VITE_MOCK_MODE=false; nothing else
  * changes.
  *
+ *   GET  {API_BASE}/health               -> HealthResponse (always live, even in MOCK_MODE)
  *   POST {API_BASE}/sr       SrRequest   -> SrResponse
  *   GET  {API_BASE}/metrics              -> MetricsResponse
  *
@@ -18,9 +19,33 @@ import { bboxAround, estimateAoi, type Bbox } from "../geo/aoi";
 import metricsFixture from "./fixtures/metrics.json";
 
 export const MOCK_MODE: boolean = import.meta.env.VITE_MOCK_MODE !== "false";
-const API_BASE: string = import.meta.env.VITE_API_BASE ?? "/api";
+export const API_BASE: string = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 /** Simulated round trip in MOCK_MODE, so the loading states run before a backend exists. */
 const MOCK_LATENCY_MS = 300;
+/** A health probe slower than this counts as offline. */
+const HEALTH_TIMEOUT_MS = 3000;
+
+// --------------------------------------------------------- GET /health ----
+
+export type HealthResult = { online: true } | { online: false; reason: string };
+
+/**
+ * One probe of the backend. Never throws: "offline" is an expected state before
+ * Day 4, so it is returned with its reason rather than logged. The only console
+ * line an unreachable backend produces is the browser's own failed-request
+ * notice, once per page load. A 200 that is not JSON (an SPA fallback page, or
+ * some other server on the port) counts as offline.
+ */
+export async function checkHealth(): Promise<HealthResult> {
+  try {
+    const res = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
+    if (!res.ok) return { online: false, reason: `GET /health -> HTTP ${res.status}` };
+    await res.json();
+    return { online: true };
+  } catch (exc) {
+    return { online: false, reason: exc instanceof Error ? exc.message : String(exc) };
+  }
+}
 
 // ------------------------------------------------------------ POST /sr ----
 

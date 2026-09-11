@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Map as MlMap } from "maplibre-gl";
 import { APP_CONFIG } from "../config";
 import { bboxFromCorners, estimateAoi, type Bbox, type LngLat } from "../geo/aoi";
@@ -19,18 +19,22 @@ interface Props {
   onChange: (bbox: Bbox | null) => void;
   onRun: (bbox: Bbox) => void;
   running: boolean;
+  /** Shown under the run button: the last request's error or provenance. */
+  runStatus?: ReactNode;
 }
 
 /**
  * Draw a rectangle on the map and report its EPSG:4326 bbox, the implied pixel
  * dimensions at the input and output GSD, and its cost in inference tiles. An
- * AOI over the tile budget is flagged and cannot be submitted.
+ * AOI over the tile budget is flagged and cannot be submitted. Renders two
+ * panel sections, "Area of interest" and "Run super-resolution", because the
+ * run button's enabled state depends on the drawing state and the estimate.
  *
  * The gesture uses Pointer Events on the map's canvas container, with the
  * map's own pan/zoom handlers disabled while drawing, so a mouse drag and a
  * one-finger drag draw the same rectangle.
  */
-export function AoiPicker({ map, renderOn, bbox, onChange, onRun, running }: Props) {
+export function AoiPicker({ map, renderOn, bbox, onChange, onRun, running, runStatus }: Props) {
   const [drawing, setDrawing] = useState(false);
   const estimate = useMemo(() => (bbox ? estimateAoi(bbox, APP_CONFIG) : null), [bbox]);
   const onChangeRef = useRef(onChange);
@@ -109,20 +113,12 @@ export function AoiPicker({ map, renderOn, bbox, onChange, onRun, running }: Pro
 
   const button = "rounded border border-slate-400 px-3 py-1.5 font-medium disabled:cursor-not-allowed disabled:opacity-40";
   return (
+    <>
     <section className="space-y-2" data-testid="aoi">
       <h2 className="font-semibold">Area of interest</h2>
       <div className="flex flex-wrap gap-2">
         <button type="button" data-testid="aoi-draw" className={`${button} ${drawing ? "bg-blue-600 text-white" : "bg-white"}`} onClick={() => setDrawing((d) => !d)}>
           {drawing ? "Cancel drawing" : "Draw AOI"}
-        </button>
-        <button
-          type="button"
-          data-testid="aoi-run"
-          className={`${button} bg-slate-900 text-white`}
-          disabled={!bbox || !estimate || estimate.overBudget || running || drawing}
-          onClick={() => bbox && onRun(bbox)}
-        >
-          {running ? "Running…" : "Super-resolve AOI"}
         </button>
       </div>
       {drawing && <p className="text-xs text-blue-700">Drag a rectangle on the map, with a mouse or a finger. Esc cancels.</p>}
@@ -164,5 +160,20 @@ export function AoiPicker({ map, renderOn, bbox, onChange, onRun, running }: Pro
         </div>
       )}
     </section>
+
+    <section className="space-y-2" data-testid="run">
+      <h2 className="font-semibold">Run super-resolution</h2>
+      <button
+        type="button"
+        data-testid="aoi-run"
+        className={`${button} bg-slate-900 text-white`}
+        disabled={!bbox || !estimate || estimate.overBudget || running || drawing}
+        onClick={() => bbox && onRun(bbox)}
+      >
+        {running ? "Running…" : "Super-resolve AOI"}
+      </button>
+      {runStatus}
+    </section>
+    </>
   );
 }

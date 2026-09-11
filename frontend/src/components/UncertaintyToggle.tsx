@@ -13,7 +13,7 @@ export function UncertaintyToggle({ layer, visible, opacity, onVisibleChange, on
   const disabled = layer === null;
   return (
     <section className="space-y-1" data-testid="uncertainty">
-      <h2 className="font-semibold">Uncertainty</h2>
+      <h2 className="font-semibold">Uncertainty overlay</h2>
       <label className="flex items-center gap-2">
         <input type="checkbox" data-testid="unc-toggle" checked={visible} disabled={disabled} onChange={(e) => onVisibleChange(e.target.checked)} />
         Show per-pixel σ over the reconstruction

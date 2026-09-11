@@ -37,6 +37,8 @@ function watchErrors(page, label) {
     const text = msg.text();
     // A basemap tile that fails to load is the network, not this code.
     if (tileHosts.some((h) => where.includes(h) || text.includes(h))) return;
+    // The one health probe to an absent backend: the browser logs it, the badge shows it.
+    if (where.endsWith("/health")) return;
     errors.push(`${label} console.error: ${text} @ ${where}`);
   });
   return errors;

@@ -27,6 +27,25 @@ const parseCount = (s: string): number | null => {
 
 const cell = "px-1.5 py-0.5 text-right tabular-nums";
 
+/**
+ * Per-AOI metrics, in display order. No endpoint returns them yet (MOCK_MODE
+ * runs no model), so every value is "—" until Day 4 wires one up.
+ */
+const AOI_METRICS = ["LPIPS", "Spectral consistency", "SSIM", "PSNR"] as const;
+
+function AoiMetrics() {
+  return (
+    <dl data-testid="aoi-metrics" className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 text-xs">
+      {AOI_METRICS.map((m) => (
+        <div key={m} className="contents">
+          <dt className="text-slate-600">{m}</dt>
+          <dd className="text-right tabular-nums">—</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 /** The Day 3 headline table, read through the API client (a fixture in MOCK_MODE). */
 export function MetricsPanel() {
   const [data, setData] = useState<MetricsResponse | null>(null);
@@ -46,14 +65,31 @@ export function MetricsPanel() {
     };
   }, []);
 
+  const head = (
+    <>
+      <h2 className="font-semibold">Metrics</h2>
+      <h3 className="text-xs font-medium text-slate-600">This AOI</h3>
+      <AoiMetrics />
+    </>
+  );
   if (error) {
     return (
-      <section role="alert" data-testid="metrics" className="rounded border border-red-600 bg-red-50 p-2 text-xs text-red-800">
-        Metrics failed to load: {error}
+      <section data-testid="metrics" className="space-y-2">
+        {head}
+        <div role="alert" className="rounded border border-red-600 bg-red-50 p-2 text-xs text-red-800">
+          Validation metrics failed to load: {error}
+        </div>
       </section>
     );
   }
-  if (!data) return <section data-testid="metrics" className="text-xs text-slate-500">Loading metrics…</section>;
+  if (!data) {
+    return (
+      <section data-testid="metrics" className="space-y-2">
+        {head}
+        <p className="text-xs text-slate-500">Loading validation metrics…</p>
+      </section>
+    );
+  }
 
   const row = (r: MetricsRow, supplementary: boolean) => {
     const params = parseCount(r.params);
@@ -82,7 +118,8 @@ export function MetricsPanel() {
 
   return (
     <section className="space-y-2" data-testid="metrics">
-      <h2 className="font-semibold">Day 3 results</h2>
+      {head}
+      <h3 className="pt-1 text-xs font-medium text-slate-600">Validation split, Day 3 results</h3>
       <p className="text-xs text-slate-600">
         {data.n_pairs.toLocaleString("en-US")} validation pairs · written {data.written_utc} · <code>{data.source}</code>
         {MOCK_MODE && <span className="ml-1 rounded bg-slate-200 px-1">fixture snapshot</span>}
