@@ -1,0 +1,12 @@
+{
+  "status": "ok",
+  "model": {
+    "backend": "torch-fp32",
+    "checkpoint_id": "a2-last-dce224ec",
+    "params": 855652,
+    "model_bytes": 3422608,
+    "threads": 6,
+    "interim": false,
+    "has_scale_head": false
+  }
+}

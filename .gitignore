@@ -62,3 +62,10 @@ runs/kaggle/
 # covers the rasters; this rule also covers manifest.json, which names the exact
 # STAC items and so makes the directory reproducible without versioning pixels.
 data/delhi/
+
+# MVP night build (mvp/night-build): exported models, API job outputs, report
+# figures and scratch. Evidence JSON under reports/mvp/ stays tracked.
+artifacts/
+app/_jobs/
+reports/mvp/*.png
+reports/mvp/_scratch/

@@ -1,0 +1,66 @@
+{
+  "job_id": "fixture-0001",
+  "input": {
+    "source": "sample",
+    "sample_id": "NA5120_E1186N0721__m_3812251_ne_10_060_20200602",
+    "lr_size": [64, 64],
+    "sr_size": [256, 256],
+    "georeferenced": true,
+    "dn_mode_applied": "reflectance"
+  },
+  "model": {
+    "backend": "torch-fp32",
+    "checkpoint_id": "a2-last-dce224ec",
+    "params": 855652,
+    "model_bytes": 3422608,
+    "threads": 6,
+    "interim": false,
+    "has_scale_head": false
+  },
+  "uncertainty_method": "tta4",
+  "images": {
+    "lr_rgb": "/fixtures/lr_rgb.png",
+    "lr_fcc": "/fixtures/lr_fcc.png",
+    "bicubic_rgb": "/fixtures/bicubic_rgb.png",
+    "bicubic_fcc": "/fixtures/bicubic_fcc.png",
+    "sr_rgb": "/fixtures/sr_rgb.png",
+    "sr_fcc": "/fixtures/sr_fcc.png",
+    "hr_rgb": "/fixtures/hr_rgb.png",
+    "hr_fcc": "/fixtures/hr_fcc.png",
+    "uncertainty": "/fixtures/uncertainty.png",
+    "consistency": "/fixtures/consistency.png"
+  },
+  "downloads": {
+    "sr_tif": "/files/fixture-0001/sr.tif",
+    "uncertainty_tif": "/files/fixture-0001/uncertainty.tif"
+  },
+  "metrics": {
+    "reference_free": {
+      "spec_l1": 0.00276109,
+      "spec_sam_deg": 0.78,
+      "spec_l1_bicubic": 0.00121004,
+      "spec_sam_bicubic_deg": 0.45,
+      "hf_ratio_vs_bicubic": 1.3982,
+      "unc_mean": 0.0042,
+      "unc_p95": 0.011,
+      "runtime_ms": {"sr": 180.0, "uncertainty": 700.0, "total": 950.0}
+    },
+    "with_gt": {
+      "sr": {"lpips": 0.332209, "ssim": 0.888901, "psnr": 38.8708, "sam_deg": 1.97205, "ergas": 2.89657},
+      "bicubic": {"lpips": 0.403318, "ssim": 0.882467, "psnr": 38.4717, "sam_deg": 2.09246, "ergas": 3.05026},
+      "spec_l1_hr": 0.005733,
+      "spec_sam_hr_deg": 1.2748,
+      "hf_ratio_hr_vs_bicubic": 16.111
+    }
+  },
+  "refs": {
+    "spec_l1_gt_floor": 0.005733,
+    "spec_sam_gt_floor_deg": 1.2748,
+    "unc_display_max": 0.02,
+    "cons_display_max": 0.02,
+    "sharpness_warn_below": 1.05
+  },
+  "warnings": [
+    "FIXTURE: static example response for UI development. with_gt values are the Day 3 full-VAL means (reports/day3_ab_metrics.csv, A2 and bicubic rows), not measurements of this sample; reference_free, runtime and display maxima are placeholders."
+  ]
+}
