@@ -245,9 +245,43 @@ a ranking. 19.9% of pixel mass has an implied log-variance below the NLL head's
 on that bound, and that alone is not collapse.
 
 The head itself (`--uncertainty 1`), the NLL with its warmup, and the
-sigma-collapse monitor are implemented and tested on branch `day3-uncertainty`,
-off by default, with Day 3 checkpoints loading into the head-enabled model
-bit-identically on the SR output.
+sigma-collapse monitor are merged to `main`. They are off by default, and Day 3
+checkpoints load into the head-enabled model bit-identically on the SR output.
+
+**B1's −33% consistency gain is not bought with blur against the control, but
+neither model adds much ×4-band detail.** Both logs measure the Sobel gradient
+and the high-frequency energy fraction on the same 400 in-loop validation
+patches as the GT and bicubic reference lines. frac = 0 means bicubic, 1 means
+GT.
+
+| run @ 12k | Sobel frac | HF-energy frac | full-split L1_spec ÷ floor |
+|---|---|---|---|
+| A2 (control) | 0.014 | 0.023 | 0.48× |
+| B1 (λ 0.1/0.02) | **0.060** | 0.022 | 0.24× |
+| bicubic | 0 | 0 | 0.21× |
+
+B1 is above A2 on Sobel at 23 of 23 validations from 1k on, and 1.3% below on
+HF energy. Neither curve drifts toward bicubic while `l1_spec` falls. But both
+runs sit about 2% of the way from bicubic to GT in the ×4 band. B1 also pays
+0.105 dB PSNR and +0.013 LPIPS against A2, both resolved. The spectral floor is
+a reference point, not a lower bound: going below it is a warning sign for
+over-smoothing, not an achievement (see
+[reports/day3_spectral_floor.md](reports/day3_spectral_floor.md)).
+
+Stated plainly (see [reports/day3_results.md](reports/day3_results.md)):
+- Only 2 of 12 checkpoints per Day 3 run survived a trainer bug that wrote each
+  one over `last.pt`.
+- The selection rule chose between those two.
+- A2 and B1 both selected the final iterate, so neither had converged at 12k.
+
+**Pre-Day-4 fixes, in place and tested:**
+- Every `--ckpt-every` checkpoint now persists as `ckpt_it<NNNNNN>.pt`.
+- The NLL gradient stops at the SR output by default (`--nll-detach-sr 1`), at
+  `--nll-weight 0.1`. The trainer logs the measured NLL-to-L1 gradient ratio at
+  the SR output every validation: raw (the ~90×) and applied.
+- `calibrate_uncertainty.py` reports every predictor's AUSE, a head's
+  included, only beside the SR-gradient control and the delta.
+- Parallel sessions work in git worktrees; see AGENTS.md section 4.
 
 **Next:** Run C (heteroscedastic head), then ONNX export and INT8 CPU
 benchmarking of both output rasters.

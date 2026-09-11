@@ -29,6 +29,14 @@ TTA curve is only evidence of UNCERTAINTY if TTA beats a predictor that knows
 nothing about the model's doubt. :func:`gradient_magnitude` of the SR output is
 that control: free, model-agnostic, and precisely the "it's just an edge
 detector" hypothesis. Both are scored on the same pixels by the same code.
+
+THE CONTROL IS NOT OPTIONAL. :func:`score_against_control` is the only function
+here that turns a predictor into an AUSE for reporting, and it requires the
+control's histogram and returns both scores and their delta together;
+:func:`controlled_ause_markdown` renders every predictor row with its control
+row and the delta directly beneath. A head's AUSE therefore cannot be reported
+without the gradient-magnitude AUSE beside it -- which is the bar Run C's head
+has to clear to be worth presenting.
 """
 
 from __future__ import annotations
@@ -47,6 +55,8 @@ __all__ = [
     "monotonicity",
     "sparsification_curve",
     "ause",
+    "score_against_control",
+    "controlled_ause_markdown",
     "gradient_magnitude",
     "plot_calibration",
 ]
@@ -287,6 +297,91 @@ def ause(pred: np.ndarray, oracle: np.ndarray, fractions: Sequence[float]) -> Di
     a = float(trap(pred - oracle, fr)) / mae0
     a_rand = float(trap(mae0 - oracle, fr)) / mae0
     return {"ause": a, "ause_random": a_rand, "ause_ratio": a / a_rand if a_rand > 0 else float("nan")}
+
+
+def score_against_control(
+    predictor: PredictorHistogram,
+    control: PredictorHistogram,
+    oracle: PredictorHistogram,
+    fractions: Sequence[float],
+    band: Optional[int] = None,
+) -> Dict[str, Any]:
+    """AUSE of an uncertainty predictor, only ever returned beside the control's.
+
+    Args:
+        predictor: Histogram of the uncertainty predictor (TTA std, a head's
+            sigma) against the error of the SR output it describes.
+        control: Histogram of :func:`gradient_magnitude` of THE SAME SR output,
+            against THE SAME error.
+        oracle: Histogram of that error against itself.
+        fractions: Sparsification grid, starting at 0.
+        band: One band, or None to pool.
+
+    Returns:
+        ``predictor`` and ``control`` (each :func:`ause`'s dict),
+        ``delta_ause`` (predictor minus control; negative means the predictor
+        ranks error better than the edge detector), ``delta_ratio`` (the same
+        on the ratio-to-random scale) and ``beats_control``.
+
+    Raises:
+        ValueError: The three histograms did not count the same pixels in every
+            band. A control scored on different pixels, or against a different
+            error, is not a control, and the delta would be meaningless.
+    """
+    reference = predictor.count.sum(dim=1)
+    for name, hist in (("control", control), ("oracle", oracle)):
+        if hist.n_bands != predictor.n_bands or not torch.equal(hist.count.sum(dim=1), reference):
+            raise ValueError(
+                f"the {name} histogram counted different pixels from the predictor "
+                f"({hist.count.sum(dim=1).tolist()} vs {reference.tolist()} per band); "
+                "the control must be scored on the same pixels against the same error."
+            )
+    fr = np.asarray(fractions, dtype=np.float64)
+    oracle_curve = sparsification_curve(oracle, fr, band=band)
+    pred = ause(sparsification_curve(predictor, fr, band=band), oracle_curve, fr)
+    ctl = ause(sparsification_curve(control, fr, band=band), oracle_curve, fr)
+    return {
+        "predictor": pred,
+        "control": ctl,
+        "delta_ause": pred["ause"] - ctl["ause"],
+        "delta_ratio": pred["ause_ratio"] - ctl["ause_ratio"],
+        "beats_control": bool(pred["ause"] < ctl["ause"]),
+    }
+
+
+def controlled_ause_markdown(rows: Sequence[Mapping[str, Any]]) -> List[str]:
+    """The AUSE table: each predictor, its control directly beneath, and the delta.
+
+    Args:
+        rows: One mapping per predictor: ``display`` (name), ``control_display``
+            (what the control was computed on) and ``score``
+            (:func:`score_against_control` output).
+
+    Returns:
+        Markdown table lines.
+
+    Raises:
+        KeyError: A row lacks its control score -- there is no way to render a
+            predictor's AUSE alone.
+    """
+    lines = [
+        "| predictor | AUSE ↓ | AUSE ÷ random ↓ | Δ AUSE vs control | verdict |",
+        "|---|---:|---:|---:|---|",
+    ]
+    for row in rows:
+        score = row["score"]
+        pred, ctl = score["predictor"], score["control"]
+        verdict = ("**beats** the gradient control" if score["beats_control"]
+                   else "**does not beat** the gradient control")
+        lines.append(
+            f"| {row['display']} | {pred['ause']:.4f} | {pred['ause_ratio']:.3f} | "
+            f"{score['delta_ause']:+.4f} | {verdict} |"
+        )
+        lines.append(
+            f"| ↳ control: {row['control_display']} | {ctl['ause']:.4f} | "
+            f"{ctl['ause_ratio']:.3f} | — | — |"
+        )
+    return lines
 
 
 def gradient_magnitude(x: torch.Tensor) -> torch.Tensor:

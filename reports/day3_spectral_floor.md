@@ -86,14 +86,34 @@ weight it pulls towards doing no super-resolution at all, buying agreement with
 the Sentinel-2 PSF at the price of the high-frequency detail the task exists to
 produce.
 
-**Recommendation.** Treat 0.5 / 0.1 as the upper bracket, not a settled choice,
-and watch `val_l1_spec` against 0.005733 from the first validation onward:
+**The floor is a reference point, not a lower bound.** Going below it is a
+warning sign for over-smoothing, not an achievement. An output that averages to
+the LR more closely than the ground truth does is closer to the Sentinel-2 PSF
+than the real HR, and bicubic, which adds no detail at all, scores 0.21× the
+floor. **Run B (B1) lands at L1_spec 0.001396 on the full validation split,
+0.24× the floor**, next to bicubic's 0.21× (`reports/day3_results.md`). The
+control A2 is also below it, at 0.48×, with the spectral term at zero, so an
+L1-trained network sits below the floor by construction.
+
+That is the reading the numbers support. The original version of this section
+(below, struck through in substance) predated them.
+
+**Recommendation (as written 2026-09-09, before any run).** Treat 0.5 / 0.1 as
+the upper bracket, not a settled choice, and watch `val_l1_spec` against
+0.005733 from the first validation onward:
 
 - lands **near 0.0057** → the model has extracted everything the constraint
   contains. This is the claim we want, and it is now falsifiable.
-- lands **below 0.0057** → the spectral term has overridden the reconstruction
-  L1. Lower `lambda1`; the detail loss will show up as a PSNR/SSIM regression
-  against Run A2 before it shows up anywhere else.
+- lands **below 0.0057** → ~~the spectral term has overridden the
+  reconstruction L1~~. **Revised 2026-09-11:** every learned model lands here,
+  the control included, so this outcome alone does not diagnose the spectral
+  term. What it does flag is over-smoothing, to be checked against the blur
+  diagnostic and PSNR/LPIPS against A2. For B1 that check came back as follows.
+  Against A2, B1 is *not* blurrier: Sobel gradient +5.8%, high-frequency energy
+  −1.3%, over the 400 in-loop validation patches at 12k. But both runs sit only
+  ~2% of the way from bicubic to ground truth in the ×4 band (high-frequency
+  energy frac 0.022 and 0.023). B1 pays 0.105 dB PSNR and +0.013 LPIPS against
+  A2, both resolved.
 - stays **well above 0.0057** → the constraint has not been learned; raising
   `lambda1` is justified.
 

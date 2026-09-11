@@ -41,9 +41,10 @@ deliverable. B2 is upside.** So:
   single-run duration remains. The median of the two observed runs, not an
   estimate: by then the session has measured itself.
 
-WHAT EACH RUN LEAVES BEHIND, under ``--runs-root/<name>/``: ``last.pt``,
-``best.pt``, ``log.csv``, ``run_metadata.json``, ``sharpness_reference.json``
-and ``run_summary.json``. This script adds ``day3_manifest.json`` at the root,
+WHAT EACH RUN LEAVES BEHIND, under ``--runs-root/<name>/``: one
+``ckpt_it<NNNNNN>.pt`` per ``--ckpt-every`` (runs trained before the fix kept
+only the last), ``last.pt`` (the resume pointer), ``best.pt``, ``log.csv``,
+``run_metadata.json``, ``sharpness_reference.json`` and ``run_summary.json``. This script adds ``day3_manifest.json`` at the root,
 which is the single file that answers "what were these three runs, and were
 they the same experiment".
 

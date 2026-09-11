@@ -34,13 +34,27 @@ much pixel mass has an implied log-variance below the floor.
 NUMERICS. Computed in float32 outside autocast by the caller: ``exp(10)``
 overflows nothing in fp32, but a residual^2 of 1e-6 is below fp16's normal
 range, and a loss that moves with the AMP setting is not a loss.
+
+GRADIENT CONTROL -- WHY THE NLL DOES NOT TRAIN THE SR OUTPUT BY DEFAULT. At the
+SR output, dL1/dsr = sign(r)/N while dNLL/dsr = exp(-s) * r / N. With s ~ -9
+and r ~ 0.01 reflectance that is exp(9) * 0.01 ~ 80x the L1 gradient per pixel
+-- the "90x" measured before Day 4 -- so a joint path would hand the
+reconstruction to the NLL, which down-weights exactly the high-error pixels
+(large s) and spends PSNR, a headline-table number, to do it. Hence
+:func:`nll_objective`'s ``detach_sr`` (``--nll-detach-sr``, default on): the
+NLL sees a DETACHED SR, and the trainer also feeds the head detached features,
+so the NLL's gradient reaches the variance branch and nothing else. The
+reconstruction then trains exactly as a Day 3 run's. :func:`sr_grad_ratio`
+measures the ratio every validation, in both modes, so the 90x is a logged
+number rather than an assumption.
 """
 
 from __future__ import annotations
 
 import torch
+import torch.nn.functional as F
 
-__all__ = ["gaussian_nll", "nll_weight_at"]
+__all__ = ["gaussian_nll", "nll_objective", "nll_weight_at", "sr_grad_ratio"]
 
 
 def gaussian_nll(
@@ -81,6 +95,81 @@ def gaussian_nll(
         )
     s = logvar.clamp(float(logvar_min), float(logvar_max))
     return (0.5 * (torch.exp(-s) * (hr - sr).pow(2) + s)).mean()
+
+
+def nll_objective(
+    sr: torch.Tensor,
+    logvar: torch.Tensor,
+    hr: torch.Tensor,
+    logvar_min: float,
+    logvar_max: float,
+    detach_sr: bool,
+) -> torch.Tensor:
+    """The NLL term as the trainer adds it, with the SR-output gradient controlled.
+
+    Args:
+        sr: ``float32``, ``(B, C, H, W)``. Predicted surface reflectance,
+            unclipped, still attached to the graph.
+        logvar: ``float32``, same shape. Predicted log-variance (reflectance^2).
+        hr: ``float32``, same shape. Ground-truth surface reflectance.
+        logvar_min: Lower clamp, as :func:`gaussian_nll`.
+        logvar_max: Upper clamp.
+        detach_sr: True stops the NLL gradient at the SR output, so the term
+            trains only what produced ``logvar``. The caller must ALSO call the
+            model with ``detach_var=True`` for "only the variance branch" to
+            hold -- otherwise the gradient still reaches the trunk through the
+            head's input features, and from there the SR output.
+
+    Returns:
+        Scalar ``float32`` tensor, the unweighted :func:`gaussian_nll`.
+    """
+    return gaussian_nll(sr.detach() if detach_sr else sr, logvar, hr, logvar_min, logvar_max)
+
+
+def sr_grad_ratio(
+    sr: torch.Tensor,
+    logvar: torch.Tensor,
+    hr: torch.Tensor,
+    logvar_min: float,
+    logvar_max: float,
+) -> float:
+    """``||dNLL/dsr|| / ||dL1/dsr||`` at the SR output, both terms UNWEIGHTED.
+
+    Measured on detached float32 copies, so it is the same number whichever
+    mode trained the model and never touches the training graph. Both
+    gradients at the SR output are functions of the values alone
+    (``sign(r)/N`` and ``exp(-s) * r / N``), so this is exactly what each term
+    would push into the network before the chain rule, not an estimate. The
+    trainer multiplies it by the schedule's weight for the ``applied`` column,
+    and records 0 for that column when ``--nll-detach-sr`` blocks the path.
+
+    Args:
+        sr: ``(B, C, H, W)``, any float dtype. Predicted surface reflectance.
+        logvar: Same shape. Predicted log-variance.
+        hr: Same shape. Ground-truth surface reflectance.
+        logvar_min: Lower clamp, as :func:`gaussian_nll`.
+        logvar_max: Upper clamp.
+
+    Returns:
+        A non-negative Python float.
+
+    Raises:
+        ValueError: ``sr == hr`` everywhere, so the L1 gradient is zero and the
+            ratio undefined. Raised rather than reported as inf or 0: either
+            would read as a measurement.
+    """
+    with torch.enable_grad():
+        s = sr.detach().float().requires_grad_(True)
+        target = hr.detach().float()
+        (g_l1,) = torch.autograd.grad(F.l1_loss(s, target), s)
+        (g_nll,) = torch.autograd.grad(
+            gaussian_nll(s, logvar.detach().float(), target, logvar_min, logvar_max), s
+        )
+    denom = float(g_l1.norm())
+    if denom == 0.0:
+        raise ValueError("sr equals hr at every element; the L1 gradient is zero and "
+                         "the NLL/L1 gradient ratio is undefined.")
+    return float(g_nll.norm()) / denom
 
 
 def nll_weight_at(it: int, warmup_iters: int, ramp_iters: int, weight: float) -> float:

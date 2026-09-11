@@ -31,6 +31,7 @@ from src.train import (
     LOG_COLUMNS,
     REFERENCE_COLUMNS,
     SPECTRAL_COLUMNS,
+    UNCERTAINTY_COLUMNS,
     build_parser,
     ensure_log_header,
 )
@@ -102,7 +103,7 @@ def test_the_new_columns_are_appended_not_interleaved():
         "val_sam_hr",
         "val_ergas",
     ]
-    assert LOG_COLUMNS[len(REFERENCE_COLUMNS):] == [
+    assert UNCERTAINTY_COLUMNS[len(REFERENCE_COLUMNS):] == [
         "val_nll",
         "nll_weight",
         "val_logvar_mean",
@@ -111,6 +112,10 @@ def test_the_new_columns_are_appended_not_interleaved():
         "val_logvar_spatial_std",
         "val_logvar_clamp_lo_frac",
         "val_logvar_clamp_hi_frac",
+    ]
+    assert LOG_COLUMNS[len(UNCERTAINTY_COLUMNS):] == [
+        "nll_grad_ratio_raw",
+        "nll_grad_ratio_applied",
     ]
 
 
@@ -132,7 +137,9 @@ def test_a_fresh_log_gets_the_current_header(tmp_path):
         assert next(csv.reader(handle)) == LOG_COLUMNS
 
 
-@pytest.mark.parametrize("schema", [LEGACY_COLUMNS, SPECTRAL_COLUMNS, REFERENCE_COLUMNS])
+@pytest.mark.parametrize(
+    "schema", [LEGACY_COLUMNS, SPECTRAL_COLUMNS, REFERENCE_COLUMNS, UNCERTAINTY_COLUMNS]
+)
 def test_an_older_log_is_widened_in_place(tmp_path, schema):
     """The resume path. Appending current rows to a narrower file corrupts it.
 
@@ -222,7 +229,8 @@ def test_curves_reads_every_schema(tmp_path):
         writer.writerow(
             [2000, "", "", "31.5", "", "0.0210", "0.0361", "1.0",
              "0.0154", "0.0312", "0.881", "0.402", "2.11", "3.02",
-             "-3.9", "0.5", "-8.7", "-10.0", "-4.2", "0.61", "0.12", "0.0"]
+             "-3.9", "0.5", "-8.7", "-10.0", "-4.2", "0.61", "0.12", "0.0",
+             "88.5", "0.0"]
         )
         writer.writerow(
             [4000, "", "", "31.9", "", "0.0200", "0.0350", "1.0",

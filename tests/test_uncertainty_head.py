@@ -244,6 +244,7 @@ def test_the_cli_and_model_defaults_mirror_base_yaml():
     assert defaults["nll_weight"] == float(u.nll.weight)
     assert defaults["nll_warmup"] == int(u.nll.warmup_iters)
     assert defaults["nll_ramp"] == int(u.nll.ramp_iters)
+    assert defaults["nll_detach_sr"] == int(bool(u.nll.detach_sr))
 
     sig = inspect.signature(EDSR.__init__).parameters
     assert sig["uncertainty"].default is False
@@ -251,6 +252,13 @@ def test_the_cli_and_model_defaults_mirror_base_yaml():
     assert sig["logvar_min"].default == float(u.logvar_min)
     assert sig["logvar_max"].default == float(u.logvar_max)
     assert sig["logvar_init"].default == float(u.logvar_init)
+
+
+def test_the_nll_defaults_protect_the_reconstruction():
+    """Day 4's gradient control is ON by default, at the reduced weight."""
+    defaults = {a.dest: a.default for a in build_parser()._actions}
+    assert defaults["nll_detach_sr"] == 1
+    assert defaults["nll_weight"] == 0.1
 
 
 def test_var_head_prefix_names_the_head():

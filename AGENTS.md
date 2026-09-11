@@ -167,3 +167,49 @@ outputs/       Gitignored: figures/, metrics/, checkpoints/, run.log.
 Run tests with `D:\SIH\DrishtiSR\.venv\Scripts\python.exe -m pytest` from the
 repository root. NOT `py -3.11 -m pytest` -- see the Python-versions table
 above; that interpreter exists but has none of the dependencies.
+
+---
+
+## 4. Parallel sessions: one git worktree per branch
+
+More than one session works in this repo at once. **Never switch the branch of
+the shared tree `D:\SIH\DrishtiSR`**: a switch there moves every live session
+onto the new branch without telling it. MEASURED 2026-09-11: the tree was
+switched to `day3-uncertainty`, and the frontend session then committed
+`dd9420f` onto that branch without knowing. The shared tree stays on `main`.
+Any session that needs another branch gets its own worktree:
+
+```
+# create: a new branch off main, in its own directory
+git worktree add -b <branch> D:\SIH\DrishtiSR-worktrees\<branch> main
+# or check out an existing branch
+git worktree add D:\SIH\DrishtiSR-worktrees\<branch> <branch>
+
+git worktree list                                          # who has what
+git worktree remove D:\SIH\DrishtiSR-worktrees\<branch>    # when done (tree must be clean)
+git worktree prune                                         # drop stale entries
+```
+
+Git will not check out a branch in two worktrees at once. That is the
+guarantee: `git switch <branch>` in any other tree fails with
+`fatal: '<branch>' is already used by worktree at ...`.
+
+Verified 2026-09-11:
+- Two worktrees ran at once on `wt-verify-a` and `wt-verify-b`, and the shared
+  tree stayed on `main`.
+- Git refused both cross-checkouts.
+- Inside a worktree, `D:\SIH\DrishtiSR\.venv\Scripts\python.exe -m pytest`
+  imported the **worktree's** `src/`
+  (`D:\SIH\DrishtiSR-worktrees\verify-a\src\__init__.py`), not the main tree's.
+  This works because the venv has no editable install pointing at the main tree.
+
+Things a worktree does NOT share:
+- **`outputs/` is per tree** (gitignored), and so is `repo_root()`. A worktree
+  starts with no cache, splits, or checkpoints. Pass `--data-root` or
+  `paths.data_root=<absolute path>` explicitly rather than copying data in.
+- **The venv is shared.** Use the main tree's interpreter by absolute path, as
+  in section 1. Do not create a venv per worktree, and do not
+  `pip install -e` from a worktree: an editable install would pin `src` to that
+  one tree for every session.
+- **Merge from the shared tree**, on `main`, with `git merge --ff-only
+  <branch>` or a PR. Then `git worktree remove` the branch's tree.

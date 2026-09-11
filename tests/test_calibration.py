@@ -15,9 +15,11 @@ import torch
 from src.eval.calibration import (
     PredictorHistogram,
     ause,
+    controlled_ause_markdown,
     equal_mass_bins,
     gradient_magnitude,
     monotonicity,
+    score_against_control,
     sparsification_curve,
 )
 
@@ -115,6 +117,54 @@ def test_gradient_magnitude_of_flat_and_ramp():
     assert float(gradient_magnitude(flat).abs().max()) == 0.0
     ramp = torch.arange(8.0).view(1, 1, 1, 8).expand(1, 2, 8, 8) * 0.01
     assert torch.allclose(gradient_magnitude(ramp), torch.full((1, 2, 8, 8), 0.01))
+
+
+def _scored(seed=6):
+    """An informative predictor, an uninformative control, and the oracle."""
+    u, err = _informative(seed)
+    noise = 10.0 ** (torch.rand_like(u) * 3.0 - 4.0)
+    pred, ctl, oracle = _hist(), _hist(), _hist()
+    pred.update(u, err)
+    ctl.update(noise, err)
+    oracle.update(err, err)
+    return pred, ctl, oracle
+
+
+def test_a_score_always_carries_the_control_and_the_delta():
+    score = score_against_control(*_scored(), FR)
+    assert set(score) == {"predictor", "control", "delta_ause", "delta_ratio", "beats_control"}
+    assert score["delta_ause"] == pytest.approx(
+        score["predictor"]["ause"] - score["control"]["ause"]
+    )
+    assert score["beats_control"] and score["delta_ause"] < 0
+
+
+def test_a_control_scored_on_other_pixels_is_refused():
+    pred, ctl, oracle = _scored()
+    u, err = _informative(7)
+    ctl.update(u[:1], err[:1])  # one extra batch: different pixel set
+    with pytest.raises(ValueError, match="same pixels"):
+        score_against_control(pred, ctl, oracle, FR)
+
+
+def test_the_table_puts_the_control_under_every_predictor():
+    score = score_against_control(*_scored(), FR)
+    lines = controlled_ause_markdown([
+        {"display": "head sigma", "control_display": "SR gradient", "score": score},
+        {"display": "TTA std", "control_display": "SR gradient of the mean", "score": score},
+    ])
+    body = lines[2:]
+    assert len(body) == 4
+    assert body[0].startswith("| head sigma |") and body[1].startswith("| ↳ control: SR gradient |")
+    assert body[2].startswith("| TTA std |") and body[3].startswith("| ↳ control:")
+    assert f"{score['delta_ause']:+.4f}" in body[0]
+
+
+def test_a_predictor_without_its_control_cannot_be_rendered():
+    score = score_against_control(*_scored(), FR)
+    del score["control"]
+    with pytest.raises(KeyError):
+        controlled_ause_markdown([{"display": "head", "control_display": "x", "score": score}])
 
 
 @pytest.mark.parametrize("u, err", [

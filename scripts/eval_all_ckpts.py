@@ -873,12 +873,14 @@ def main(argv=None) -> int:
             "consistency error. An L1-trained network regresses toward the conditional "
             "mean, which is smoother and closer to the Sentinel-2 PSF than the real "
             "NAIP-derived HR. Pushing consistency further down moves the output further "
-            "from the HR's own behaviour. `reports/day3_spectral_floor.md` reads "
-            "\"below the floor\" as \"the spectral term has overridden reconstruction\", "
-            "but the control sits below it with the spectral term at zero. That reading "
-            "needs revising.",
+            "from the HR's own behaviour. The floor is a reference point, not a lower "
+            "bound: going below it is a warning sign for over-smoothing, not an "
+            "achievement (`reports/day3_spectral_floor.md`).",
             "",
         ]
+    # The checkpoint caveats below are inserted HERE, in the reading, not only
+    # in section 1: they bound what the headline selection can mean.
+    reading_end = len(md)
     md += [
         "## 1. The selection rule (stated before the full-split results)",
         "",
@@ -902,17 +904,49 @@ def main(argv=None) -> int:
             f"{', '.join(f'{i:,}' for i in a['iterations'])}"
             + (f" — of the {a['scheduled']} its `--ckpt-every` schedule wrote." if a["scheduled"] else ".")
         )
+    # Stated from the files found, not assumed: a run trained after the
+    # per-checkpoint fix has found == scheduled and gets no warning.
+    caveats: List[str] = []
+    truncated = [a for a in availability if a["scheduled"] and a["found"] < a["scheduled"]]
+    if truncated:
+        caveats += [
+            "> **Most checkpoints did not survive a trainer bug** ("
+            + ", ".join(f"`{a['label']}` {a['found']} of {a['scheduled']}" for a in truncated)
+            + "). `src/train.py` wrote every scheduled checkpoint to the same `last.pt`, "
+            "each overwriting the one before, so a finished run kept only `last.pt` and the "
+            "PSNR-chosen `best.pt`. The selection rule was applied to those survivors and "
+            "nothing else. The dense curve in §5 is the training loop's own validation "
+            "(400 patches, AMP): the trajectory, not selection data. The trainer now keeps "
+            "every checkpoint as `ckpt_it<NNNNNN>.pt`, and this script scores every `*.pt` "
+            "in a run directory, so a rerun gets the full sweep unchanged.",
+            "",
+        ]
+    # A selection that lands on the last checkpoint that exists means the
+    # selection metric was still improving at the end of training.
+    at_final = [
+        label for label in selections
+        if selections[label]["selected"]
+        == max(checkpoints[label], key=lambda c: c["iteration"])["label"]
+    ]
+    if at_final:
+        last_iters = sorted({max(c["iteration"] for c in checkpoints[label]) for label in at_final})
+        caveats += [
+            "> **"
+            + ", ".join(f"{displays[label]}" for label in at_final)
+            + f" selected the final iterate.** The rule picked the last checkpoint on disk, "
+            f"and no earlier checkpoint was tied with it (§4), so `{metric}` was still "
+            "improving when training stopped. By the selection criterion, "
+            + ("this run had" if len(at_final) == 1 else
+               "neither had" if len(at_final) == 2 else "none of these runs had")
+            + " converged at "
+            + " / ".join(f"{i:,}" for i in last_iters)
+            + " iterations.",
+            "",
+        ]
+    if caveats:
+        md[reading_end:reading_end] = caveats
+        md += ["", "> The checkpoint caveats are stated under **The reading** above."]
     md += [
-        "",
-        "> **The 12-checkpoint sweep this task asked for is not possible on these runs.** "
-        "`src/train.py` writes every scheduled checkpoint to the same `last.pt`, "
-        "overwriting the one before, so a finished run keeps only `last.pt` and the "
-        "PSNR-chosen `best.pt`. The rule below therefore chooses between **two** "
-        "full-split candidates per run. The dense 24-point curve in §5 comes from the "
-        "training loop's own validation (400 patches, AMP). It shows the trajectory, "
-        "but it is not the selection data. A true 12-point full-split sweep needs the "
-        "runs repeated with per-checkpoint retention. This script scores every `*.pt` "
-        "in a run directory, so it would pick those up unchanged.",
         "",
         "## 2. The table",
         "",

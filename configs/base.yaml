@@ -582,8 +582,16 @@ uncertainty:
   # bias ~lr per step, so from ~0 the head could not reach -9 inside the ramp.
   logvar_init: -9.0
   nll:
-    # Final NLL weight, applied ON TOP of the L1 term (which is kept).
-    weight: 1.0
+    # Final NLL weight, applied ON TOP of the L1 term (which is kept). 0.1, not
+    # 1.0: at the SR output the unweighted NLL gradient is ~90x L1's (s ~ -9,
+    # r ~ 0.01 gives exp(9) * 0.01). src/train.py logs the measured ratio every
+    # validation as nll_grad_ratio_raw / _applied.
+    weight: 0.1
+    # true: the NLL gradient stops at the SR output and the head sees detached
+    # features, so the NLL trains ONLY the variance branch and the
+    # reconstruction -- PSNR, a headline-table number -- trains as Day 3's.
+    # false opens the joint path; make that a measured decision, not a default.
+    detach_sr: true
     # Pure L1, variance branch detached from the trunk.
     warmup_iters: 2000
     # Linear 0 -> weight.

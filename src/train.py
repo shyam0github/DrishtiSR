@@ -41,9 +41,11 @@ from src.config import FROZEN_CONFIG, HASH_FIELD, FrozenConfigError, load_frozen
 from src.losses import (
     DEFAULT_DOWNSAMPLE,
     gaussian_nll,
+    nll_objective,
     nll_weight_at,
     spectral_consistency,
     spectral_terms,
+    sr_grad_ratio,
 )
 from src.metrics.logvar import LogvarMonitor
 from src.metrics.image_quality import ergas, lpips, rgb_band_indices, ssim
@@ -192,6 +194,7 @@ def uncertainty_record(args) -> dict:
         "nll_weight": float(args.nll_weight),
         "nll_warmup": int(args.nll_warmup),
         "nll_ramp": int(args.nll_ramp),
+        "nll_detach_sr": bool(int(args.nll_detach_sr)),
         "init_from": str(args.init_from),
     }
 
@@ -279,8 +282,9 @@ def write_run_metadata(out: Path, args) -> dict:
 #   SPECTRAL_COLUMNS  -- Day 3, first pass: the spectral scalars.
 #   REFERENCE_COLUMNS -- Day 3 (A2/B1/B2): the blur diagnostic and the
 #                        reference metrics.
-#   LOG_COLUMNS       -- current: the NLL and the sigma-collapse monitor.
-#                        Blank on every run without the head.
+#   UNCERTAINTY_COLUMNS -- the NLL and the sigma-collapse monitor. Blank on
+#                        every run without the head.
+#   LOG_COLUMNS       -- current: the NLL-to-L1 gradient ratio at the SR output.
 #
 # NOTHING BEFORE AN APPENDED COLUMN EVER MOVES, so a reader that slices the
 # first five columns still works against all three.
@@ -312,7 +316,7 @@ REFERENCE_COLUMNS = SPECTRAL_COLUMNS + [
     "val_sam_hr",
     "val_ergas",
 ]
-LOG_COLUMNS = REFERENCE_COLUMNS + [
+UNCERTAINTY_COLUMNS = REFERENCE_COLUMNS + [
     # The heteroscedastic head (--uncertainty 1). val_nll is the UNWEIGHTED
     # Gaussian NLL over the val batches; nll_weight is the schedule's value at
     # this iteration, so the ramp is readable off the log. The six logvar
@@ -327,9 +331,40 @@ LOG_COLUMNS = REFERENCE_COLUMNS + [
     "val_logvar_clamp_lo_frac",
     "val_logvar_clamp_hi_frac",
 ]
+LOG_COLUMNS = UNCERTAINTY_COLUMNS + [
+    # ||dNLL/dsr|| / ||dL1/dsr|| at the SR output, on the TRAINING batch of the
+    # validation iteration (src.losses.sr_grad_ratio). _raw is unweighted --
+    # the "90x" itself; _applied is what actually reached the SR output this
+    # step: nll_weight * raw in the joint mode, 0 under --nll-detach-sr. Both
+    # logged in both modes, so the assumption behind the default is measured.
+    "nll_grad_ratio_raw",
+    "nll_grad_ratio_applied",
+]
 
 # Every accepted header, oldest first, so ensure_log_header can pad forward.
-KNOWN_SCHEMAS = (LEGACY_COLUMNS, SPECTRAL_COLUMNS, REFERENCE_COLUMNS, LOG_COLUMNS)
+KNOWN_SCHEMAS = (
+    LEGACY_COLUMNS, SPECTRAL_COLUMNS, REFERENCE_COLUMNS, UNCERTAINTY_COLUMNS, LOG_COLUMNS,
+)
+
+# Every scheduled --ckpt-every checkpoint persists under its own name. last.pt
+# is ALSO written, as the resume pointer, and is overwritten each time -- which
+# is all it ever was. Day 3 had only last.pt, so each checkpoint destroyed the
+# one before and A2/B1/B2 kept 2 of their 12 (reports/day3_results.md).
+# Zero-padded to 6 digits so a lexical sort is iteration order.
+CHECKPOINT_TEMPLATE = "ckpt_it{:06d}.pt"
+
+
+def checkpoint_name(iteration: int) -> str:
+    """File name of the persistent checkpoint taken after ``iteration`` steps.
+
+    Args:
+        iteration: 1-based, as ``log.csv`` counts (the checkpoint's stored
+            ``it`` is this minus one).
+
+    Returns:
+        E.g. ``ckpt_it012000.pt``.
+    """
+    return CHECKPOINT_TEMPLATE.format(int(iteration))
 
 
 def ensure_log_header(log_path: Path) -> None:
@@ -544,8 +579,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--logvar-min", type=float, default=-10.0)
     p.add_argument("--logvar-max", type=float, default=10.0)
     p.add_argument("--logvar-init", type=float, default=-9.0)
-    p.add_argument("--nll-weight", type=float, default=1.0,
+    # 0.1, not 1.0. At the SR output the unweighted NLL gradient is ~90x L1's
+    # (src/losses/nll.py); the ratio is logged every validation as
+    # nll_grad_ratio_raw so this default can be checked against a measurement.
+    p.add_argument("--nll-weight", type=float, default=0.1,
                    help="final NLL weight, added to the L1 term (which is kept)")
+    # 1 (on) by default: the NLL trains ONLY the variance branch -- the SR it
+    # sees is detached and the head gets detached features -- so the
+    # reconstruction, and therefore PSNR in the headline table, trains exactly
+    # as a Day 3 run's. 0 opens the joint path and should be a measured choice.
+    p.add_argument("--nll-detach-sr", type=int, default=1,
+                   help="1 = stop the NLL gradient at the SR output (variance branch only); "
+                        "0 = joint, the NLL also trains the reconstruction")
     p.add_argument("--nll-warmup", type=int, default=2000,
                    help="iterations of pure L1 with the variance branch detached")
     p.add_argument("--nll-ramp", type=int, default=2000,
@@ -669,12 +714,18 @@ def main() -> None:
             f"model has {count_params(model):,} parameters, over "
             f"cfg.runtime.max_parameters = {budget:,}."
         )
+    detach_sr = bool(int(args.nll_detach_sr))
     if uncertainty_on:
         print(
             f"[loss] + heteroscedastic NLL: pure L1 for {args.nll_warmup} iters "
             f"(variance branch detached), weight ramps 0 -> {args.nll_weight} over "
             f"the next {args.nll_ramp}. logvar clamp [{args.logvar_min}, "
-            f"{args.logvar_max}], init {args.logvar_init}.",
+            f"{args.logvar_max}], init {args.logvar_init}. "
+            + ("NLL gradient STOPPED at the SR output (--nll-detach-sr 1): it trains "
+               "the variance branch only."
+               if detach_sr else
+               "JOINT: the NLL gradient also trains the reconstruction "
+               "(--nll-detach-sr 0)."),
             flush=True,
         )
 
@@ -922,6 +973,12 @@ def main() -> None:
     # measured at, so a checkpoint carries the numbers that describe it rather
     # than nothing. None until the first validation has run.
     last_vals, last_vals_it = None, None
+    # The NLL/L1 gradient ratio measured on the latest validation iteration's
+    # training batch, (raw, applied); None until measured.
+    grad_ratio = None
+    # Defined before the loop so the final save names the iteration actually
+    # reached -- a time-budget break, or a resume of a finished run.
+    it = start_it - 1
     for it in range(start_it, args.iters):
         for g in opt.param_groups:
             g["lr"] = lr_at(it, args)
@@ -934,8 +991,10 @@ def main() -> None:
             if uncertainty_on:
                 # detach_var during the warmup: the variance branch gets no
                 # path to the trunk, and with nll_w == 0 no loss term either,
-                # so the reconstruction trains exactly as a Day 3 run's.
-                sr, logvar = model(lr_, detach_var=(nll_w == 0.0))
+                # so the reconstruction trains exactly as a Day 3 run's. Under
+                # --nll-detach-sr it stays detached for the whole run: that is
+                # the other half of "the NLL trains the variance branch only".
+                sr, logvar = model(lr_, detach_var=(nll_w == 0.0 or detach_sr))
             else:
                 # The control path, unchanged: same graph as A2/B1/B2.
                 sr = model(lr_)
@@ -963,9 +1022,14 @@ def main() -> None:
             # and NLL is negative in reflectance units (logvar ~ -9), so the
             # loss column can go below zero; compare runs on val columns.
             with torch.cuda.amp.autocast(enabled=False):
-                nll = gaussian_nll(sr.float(), logvar.float(), hr.float(),
-                                   args.logvar_min, args.logvar_max)
+                nll = nll_objective(sr.float(), logvar.float(), hr.float(),
+                                    args.logvar_min, args.logvar_max, detach_sr)
             loss = loss + nll_w * nll
+        if uncertainty_on and ((it + 1) % args.val_every == 0 or (it + 1) == args.iters):
+            # Measured, not assumed: on this step's batch, before the update,
+            # in both modes and during the warmup too (raw is weight-free).
+            raw = sr_grad_ratio(sr, logvar, hr, args.logvar_min, args.logvar_max)
+            grad_ratio = (raw, 0.0 if detach_sr else nll_w * raw)
         opt.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
         if args.clip > 0:
@@ -1032,7 +1096,9 @@ def main() -> None:
                     f"max {vals['logvar_max']:.4f} spatial_std "
                     f"{vals['logvar_spatial_std']:.5f} clamp lo "
                     f"{vals['logvar_clamp_lo_frac']:.4f} hi "
-                    f"{vals['logvar_clamp_hi_frac']:.4f}",
+                    f"{vals['logvar_clamp_hi_frac']:.4f} | grad NLL/L1 at SR raw "
+                    f"{grad_ratio[0]:.2f}x applied {grad_ratio[1]:.3f}x "
+                    f"({'detached' if detach_sr else 'joint'})",
                     flush=True,
                 )
                 unc_cells = [
@@ -1041,6 +1107,7 @@ def main() -> None:
                     f"{vals['logvar_max']:.6f}", f"{vals['logvar_spatial_std']:.8f}",
                     f"{vals['logvar_clamp_lo_frac']:.6f}",
                     f"{vals['logvar_clamp_hi_frac']:.6f}",
+                    f"{grad_ratio[0]:.6f}", f"{grad_ratio[1]:.6f}",
                 ]
             else:
                 # Blank, not zero: never measured on a run without the head.
@@ -1064,13 +1131,20 @@ def main() -> None:
                 best = v; save(out / "best.pt", it, vals, last_vals_it)
 
         if (it + 1) % args.ckpt_every == 0 or (it + 1) == args.iters:
+            # Its own file first, then the resume pointer: a session killed
+            # between the two leaves last.pt one checkpoint behind, which
+            # resume handles, rather than a scheduled checkpoint missing.
+            save(out / checkpoint_name(it + 1), it, last_vals, last_vals_it)
             save(ck_last, it, last_vals, last_vals_it)
         if (time.time() - t0) / 3600.0 > args.max_hours:
             save(ck_last, it, last_vals, last_vals_it)
             print(f"[stop] time budget hit at it={it+1}", flush=True)
             break
 
-    save(ck_last, args.iters - 1, last_vals, last_vals_it)
+    # `it`, not args.iters - 1: after a time-budget break the old form stamped
+    # an unfinished checkpoint with the final iteration, so a resume would
+    # skip the remaining steps and evaluation would mislabel the weights.
+    save(ck_last, it, last_vals, last_vals_it)
     elapsed_min = (time.time() - t0) / 60.0
     print(f"[done] iters={args.iters} best_val_psnr={best:.3f} elapsed={elapsed_min:.1f} min", flush=True)
 
