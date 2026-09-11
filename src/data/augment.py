@@ -32,7 +32,14 @@ from typing import Optional, Tuple
 
 import torch
 
-__all__ = ["DIHEDRAL", "apply_dihedral_pair", "augment_pair", "area_downsample"]
+__all__ = [
+    "DIHEDRAL",
+    "dihedral",
+    "invert_dihedral",
+    "apply_dihedral_pair",
+    "augment_pair",
+    "area_downsample",
+]
 
 # The 8 elements of the dihedral group of the square, as ``(hflip, vflip, k)``
 # triples in the order :func:`_transform` applies them. Exported so a test can
@@ -90,6 +97,61 @@ def _transform(x: torch.Tensor, hflip: bool, vflip: bool, k: int) -> torch.Tenso
         x = torch.flip(x, dims=(-2,))
     if k:
         x = torch.rot90(x, int(k), dims=(-2, -1))
+    return x.contiguous()
+
+
+def dihedral(x: torch.Tensor, hflip: bool, vflip: bool, k: int) -> torch.Tensor:
+    """Public form of :func:`_transform`, for tensors with any leading dims.
+
+    Used by test-time augmentation (:mod:`src.uncertainty`), which applies the
+    same group to ``(B, C, H, W)`` batches. Only the last two axes move.
+
+    Args:
+        x: Any float dtype, shape ``(..., H, W)``. Surface reflectance,
+            unclipped; values are not read, only moved.
+        hflip: Mirror along ``W``.
+        vflip: Mirror along ``H``.
+        k: Counter-clockwise quarter turns, 0..3.
+
+    Returns:
+        Same dtype, shape ``(..., H, W)`` for even ``k`` and ``(..., W, H)``
+        for odd ``k``; a contiguous copy.
+    """
+    return _transform(x, hflip, vflip, k)
+
+
+def invert_dihedral(x: torch.Tensor, hflip: bool, vflip: bool, k: int) -> torch.Tensor:
+    """Undo :func:`dihedral` with the same parameters, exactly.
+
+    ``dihedral`` applies hflip, then vflip, then ``k`` turns; the inverse is
+    ``-k`` turns, then vflip, then hflip (flips are their own inverses). Pure
+    index permutation: ``invert_dihedral(dihedral(x, *g), *g)`` equals ``x``
+    bit for bit, which ``tests/test_tta.py`` asserts for all eight elements.
+
+    Args:
+        x: Any float dtype, shape ``(..., H', W')`` -- a tensor in the
+            transformed frame, e.g. a model output on a transformed input.
+            Values are not read, only moved.
+        hflip: As passed to :func:`dihedral`.
+        vflip: As passed to :func:`dihedral`.
+        k: As passed to :func:`dihedral`, 0..3.
+
+    Returns:
+        Same dtype, the tensor in the original frame; a contiguous copy.
+
+    Raises:
+        ValueError: ``x`` has fewer than two dims or ``k`` is outside 0..3.
+    """
+    if x.ndim < 2:
+        raise ValueError(f"expected at least 2 spatial dims, got shape {tuple(x.shape)}")
+    if not 0 <= int(k) <= 3:
+        raise ValueError(f"k must be one of 0, 1, 2, 3; got {k!r}")
+    if k:
+        x = torch.rot90(x, -int(k), dims=(-2, -1))
+    if vflip:
+        x = torch.flip(x, dims=(-2,))
+    if hflip:
+        x = torch.flip(x, dims=(-1,))
     return x.contiguous()
 
 

@@ -29,6 +29,7 @@ from src.train import (
     KNOWN_SCHEMAS,
     LEGACY_COLUMNS,
     LOG_COLUMNS,
+    REFERENCE_COLUMNS,
     SPECTRAL_COLUMNS,
     build_parser,
     ensure_log_header,
@@ -93,13 +94,23 @@ def test_the_new_columns_are_appended_not_interleaved():
         "val_sam",
         "val_sam_valid_frac",
     ]
-    assert LOG_COLUMNS[len(SPECTRAL_COLUMNS):] == [
+    assert REFERENCE_COLUMNS[len(SPECTRAL_COLUMNS):] == [
         "val_sharpness",
         "val_hf_energy",
         "val_ssim",
         "val_lpips",
         "val_sam_hr",
         "val_ergas",
+    ]
+    assert LOG_COLUMNS[len(REFERENCE_COLUMNS):] == [
+        "val_nll",
+        "nll_weight",
+        "val_logvar_mean",
+        "val_logvar_min",
+        "val_logvar_max",
+        "val_logvar_spatial_std",
+        "val_logvar_clamp_lo_frac",
+        "val_logvar_clamp_hi_frac",
     ]
 
 
@@ -121,7 +132,7 @@ def test_a_fresh_log_gets_the_current_header(tmp_path):
         assert next(csv.reader(handle)) == LOG_COLUMNS
 
 
-@pytest.mark.parametrize("schema", [LEGACY_COLUMNS, SPECTRAL_COLUMNS])
+@pytest.mark.parametrize("schema", [LEGACY_COLUMNS, SPECTRAL_COLUMNS, REFERENCE_COLUMNS])
 def test_an_older_log_is_widened_in_place(tmp_path, schema):
     """The resume path. Appending current rows to a narrower file corrupts it.
 
@@ -185,20 +196,46 @@ def test_curves_reads_every_schema(tmp_path):
     ]
     assert float(read["val"]["val_sam"].iloc[0]) == pytest.approx(0.0361)
 
-    current = tmp_path / "current.csv"
-    blanks = [""] * (len(LOG_COLUMNS) - len(LEGACY_COLUMNS))
-    with current.open("w", newline="") as handle:
+    reference = tmp_path / "reference.csv"
+    blanks = [""] * (len(REFERENCE_COLUMNS) - len(LEGACY_COLUMNS))
+    with reference.open("w", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(LOG_COLUMNS)
+        writer.writerow(REFERENCE_COLUMNS)
         writer.writerow([100, "0.031", "2.0e-04", "", "12.5"] + blanks)
         writer.writerow(
             [2000, "", "", "31.5", "", "0.0210", "0.0361", "1.0",
              "0.0154", "0.0312", "0.881", "0.402", "2.11", "3.02"]
         )
+    read = read_training_log(reference)
+    assert list(read["val"].columns) == ["iter", "val_psnr"] + list(
+        REFERENCE_COLUMNS[len(LEGACY_COLUMNS):]
+    )
+
+    # The current generation: an uncertainty run's row carries the sigma
+    # monitor; a control's row leaves it blank and must still parse.
+    current = tmp_path / "current.csv"
+    with current.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(LOG_COLUMNS)
+        writer.writerow([100, "0.031", "2.0e-04", "", "12.5"]
+                        + [""] * (len(LOG_COLUMNS) - len(LEGACY_COLUMNS)))
+        writer.writerow(
+            [2000, "", "", "31.5", "", "0.0210", "0.0361", "1.0",
+             "0.0154", "0.0312", "0.881", "0.402", "2.11", "3.02",
+             "-3.9", "0.5", "-8.7", "-10.0", "-4.2", "0.61", "0.12", "0.0"]
+        )
+        writer.writerow(
+            [4000, "", "", "31.9", "", "0.0200", "0.0350", "1.0",
+             "0.0155", "0.0313", "0.882", "0.401", "2.10", "3.01"]
+            + [""] * (len(LOG_COLUMNS) - len(REFERENCE_COLUMNS))
+        )
     read = read_training_log(current)
     assert list(read["val"].columns) == ["iter", "val_psnr"] + list(
         LOG_COLUMNS[len(LEGACY_COLUMNS):]
     )
+    assert float(read["val"]["val_logvar_spatial_std"].iloc[0]) == pytest.approx(0.61)
+    assert read["val"]["val_logvar_spatial_std"].isna().iloc[1]
+    read = read_training_log(reference)
     # The blur diagnostic and the reference suite must survive the round trip:
     # they are the columns the Day 3 verdict is read off.
     assert float(read["val"]["val_sharpness"].iloc[0]) == pytest.approx(0.0154)

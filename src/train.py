@@ -33,12 +33,19 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 try:
-    from drishtisr.models.edsr import build_model, count_params
+    from drishtisr.models.edsr import build_model, count_params, load_backbone_state
 except ImportError:  # allows running the file directly during smoke tests
-    from edsr import build_model, count_params  # type: ignore
+    from edsr import build_model, count_params, load_backbone_state  # type: ignore
 
 from src.config import FROZEN_CONFIG, HASH_FIELD, FrozenConfigError, load_frozen
-from src.losses import DEFAULT_DOWNSAMPLE, spectral_consistency, spectral_terms
+from src.losses import (
+    DEFAULT_DOWNSAMPLE,
+    gaussian_nll,
+    nll_weight_at,
+    spectral_consistency,
+    spectral_terms,
+)
+from src.metrics.logvar import LogvarMonitor
 from src.metrics.image_quality import ergas, lpips, rgb_band_indices, ssim
 from src.metrics.image_quality import sam as sam_hr
 from src.metrics.sharpness import (
@@ -163,6 +170,32 @@ def epoch_stream(
         epoch += 1
 
 
+def uncertainty_record(args) -> dict:
+    """The uncertainty settings of a run, as recorded in metadata and checkpoints.
+
+    Args:
+        args: Parsed CLI arguments.
+
+    Returns:
+        ``{"enabled": bool, ...}``; the head and NLL settings are included only
+        when enabled, so a Day-3-style run records ``{"enabled": False}`` and
+        nothing that could be misread as having been used.
+    """
+    if not int(args.uncertainty):
+        return {"enabled": False}
+    return {
+        "enabled": True,
+        "var_feats": int(args.var_feats),
+        "logvar_min": float(args.logvar_min),
+        "logvar_max": float(args.logvar_max),
+        "logvar_init": float(args.logvar_init),
+        "nll_weight": float(args.nll_weight),
+        "nll_warmup": int(args.nll_warmup),
+        "nll_ramp": int(args.nll_ramp),
+        "init_from": str(args.init_from),
+    }
+
+
 def write_run_metadata(out: Path, args) -> dict:
     """Write ``run_metadata.json``: what config and what CODE this run used.
 
@@ -215,6 +248,10 @@ def write_run_metadata(out: Path, args) -> dict:
         "spectral_on": bool(
             args.spectral_lambda1 > 0.0 or args.spectral_lambda2 > 0.0
         ),
+        # Promoted for the same reason as the lambdas: frozen_day3.yaml says
+        # nothing about the head, so this block is the record of whether a run
+        # had one and how its NLL was scheduled.
+        "uncertainty": uncertainty_record(args),
         # Flattened next to the config hash because the cross-run assertion in
         # scripts/day3_runs.py reads exactly this pair, and reaching two levels
         # into a nested dict for the value a guard depends on is how a guard
@@ -238,9 +275,12 @@ def write_run_metadata(out: Path, args) -> dict:
 # a schema mismatch in the figure script hours later is how GPU time gets spent
 # twice.
 #
-#   LEGACY_COLUMNS   -- Run A.
-#   SPECTRAL_COLUMNS -- Day 3, first pass: the spectral scalars.
-#   LOG_COLUMNS      -- current: the blur diagnostic and the reference metrics.
+#   LEGACY_COLUMNS    -- Run A.
+#   SPECTRAL_COLUMNS  -- Day 3, first pass: the spectral scalars.
+#   REFERENCE_COLUMNS -- Day 3 (A2/B1/B2): the blur diagnostic and the
+#                        reference metrics.
+#   LOG_COLUMNS       -- current: the NLL and the sigma-collapse monitor.
+#                        Blank on every run without the head.
 #
 # NOTHING BEFORE AN APPENDED COLUMN EVER MOVES, so a reader that slices the
 # first five columns still works against all three.
@@ -258,7 +298,7 @@ SPECTRAL_COLUMNS = LEGACY_COLUMNS + [
     "val_sam",
     "val_sam_valid_frac",
 ]
-LOG_COLUMNS = SPECTRAL_COLUMNS + [
+REFERENCE_COLUMNS = SPECTRAL_COLUMNS + [
     # The blur diagnostic. Logged for EVERY run including the control, because
     # "the spectral run got blurrier" is only a statement if the control's
     # sharpness over the same val patches is on the same plot. See
@@ -272,9 +312,24 @@ LOG_COLUMNS = SPECTRAL_COLUMNS + [
     "val_sam_hr",
     "val_ergas",
 ]
+LOG_COLUMNS = REFERENCE_COLUMNS + [
+    # The heteroscedastic head (--uncertainty 1). val_nll is the UNWEIGHTED
+    # Gaussian NLL over the val batches; nll_weight is the schedule's value at
+    # this iteration, so the ramp is readable off the log. The six logvar
+    # columns are src.metrics.logvar.LogvarMonitor -- spatial_std collapsing
+    # toward 0 is the Day 4 kill criterion.
+    "val_nll",
+    "nll_weight",
+    "val_logvar_mean",
+    "val_logvar_min",
+    "val_logvar_max",
+    "val_logvar_spatial_std",
+    "val_logvar_clamp_lo_frac",
+    "val_logvar_clamp_hi_frac",
+]
 
 # Every accepted header, oldest first, so ensure_log_header can pad forward.
-KNOWN_SCHEMAS = (LEGACY_COLUMNS, SPECTRAL_COLUMNS, LOG_COLUMNS)
+KNOWN_SCHEMAS = (LEGACY_COLUMNS, SPECTRAL_COLUMNS, REFERENCE_COLUMNS, LOG_COLUMNS)
 
 
 def ensure_log_header(log_path: Path) -> None:
@@ -474,6 +529,33 @@ def build_parser() -> argparse.ArgumentParser:
              "in the blur diagnostic. 0.25 is the x4 band edge -- the band the "
              "LR does not contain and the model must invent.",
     )
+
+    # -- heteroscedastic uncertainty head (technical contribution 2) --------
+    #
+    # OFF BY DEFAULT, for the same reason the spectral lambdas are 0.0: every
+    # Day 3 invocation must keep training exactly the model it trained, and
+    # tests/test_frozen_config.py pins the Day 3 defaults. Mirrored by
+    # cfg.uncertainty in configs/base.yaml; tests/test_uncertainty_head.py
+    # asserts the two agree. NOT in configs/frozen_day3.yaml -- Run C gets its
+    # own freeze. See src/models/edsr.py (head) and src/losses/nll.py (NLL).
+    p.add_argument("--uncertainty", type=int, default=0,
+                   help="1 = add the log-variance head and the NLL objective")
+    p.add_argument("--var-feats", type=int, default=16)
+    p.add_argument("--logvar-min", type=float, default=-10.0)
+    p.add_argument("--logvar-max", type=float, default=10.0)
+    p.add_argument("--logvar-init", type=float, default=-9.0)
+    p.add_argument("--nll-weight", type=float, default=1.0,
+                   help="final NLL weight, added to the L1 term (which is kept)")
+    p.add_argument("--nll-warmup", type=int, default=2000,
+                   help="iterations of pure L1 with the variance branch detached")
+    p.add_argument("--nll-ramp", type=int, default=2000,
+                   help="iterations over which the NLL weight ramps 0 -> --nll-weight")
+    # The strict=False path: start from a checkpoint trained WITHOUT the head
+    # (A2/B1/B2). Only var_head.* may be missing; see load_backbone_state.
+    # Ignored when --resume finds a checkpoint -- a resumed run continues its
+    # own weights, never re-initialises from the parent.
+    p.add_argument("--init-from", default="none",
+                   help="checkpoint whose weights initialise the backbone; 'none' = scratch")
     return p
 
 
@@ -523,8 +605,15 @@ def main() -> None:
                           generator=shuffle_generator)
     val_dl = DataLoader(val_ds, batch_size=args.batch, shuffle=False, num_workers=args.workers)
 
+    uncertainty_on = bool(int(args.uncertainty))
+    head_kwargs = (
+        dict(uncertainty=True, var_feats=args.var_feats, logvar_min=args.logvar_min,
+             logvar_max=args.logvar_max, logvar_init=args.logvar_init)
+        if uncertainty_on else {}
+    )
     model = build_model("edsr_baseline", scale=args.scale, n_resblocks=args.n_resblocks,
-                        n_feats=args.n_feats, in_ch=args.in_ch, out_ch=args.in_ch).to(dev)
+                        n_feats=args.n_feats, in_ch=args.in_ch, out_ch=args.in_ch,
+                        **head_kwargs).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd, betas=(0.9, 0.99))
     scaler = torch.cuda.amp.GradScaler(enabled=bool(args.amp) and dev == "cuda")
 
@@ -537,6 +626,12 @@ def main() -> None:
         model.load_state_dict(ck["model"]); opt.load_state_dict(ck["opt"])
         scaler.load_state_dict(ck["scaler"]); start_it = ck["it"] + 1; best = ck.get("best", -1.0)
         print(f"[resume] {resume_path} @ it={start_it} best_psnr={best:.3f}", flush=True)
+    elif args.init_from not in ("none", ""):
+        parent = torch.load(args.init_from, map_location=dev, weights_only=False)
+        fresh = load_backbone_state(model, parent["model"])
+        print(f"[init-from] backbone from {args.init_from} (it={parent.get('it')}, "
+              f"lambdas={parent.get('lambdas')}); {len(fresh)} head tensors left at "
+              f"their initialisation: {fresh}", flush=True)
 
     log_path = out / "log.csv"
     ensure_log_header(log_path)
@@ -565,6 +660,23 @@ def main() -> None:
     rgb_idx = rgb_band_indices(data_cfg)
     # A subset of --val-batches, never more. See --metric-batches' help.
     metric_batches = max(1, min(int(args.metric_batches), int(args.val_batches)))
+
+    # The parameter budget, asserted rather than trusted (AGENTS.md section 1),
+    # head included.
+    budget = int(data_cfg["runtime"]["max_parameters"])
+    if count_params(model) > budget:
+        raise ValueError(
+            f"model has {count_params(model):,} parameters, over "
+            f"cfg.runtime.max_parameters = {budget:,}."
+        )
+    if uncertainty_on:
+        print(
+            f"[loss] + heteroscedastic NLL: pure L1 for {args.nll_warmup} iters "
+            f"(variance branch detached), weight ramps 0 -> {args.nll_weight} over "
+            f"the next {args.nll_ramp}. logvar clamp [{args.logvar_min}, "
+            f"{args.logvar_max}], init {args.logvar_init}.",
+            flush=True,
+        )
 
     def save(path: Path, it: int, metrics: dict = None, metrics_iter: int = None) -> None:
         """Write a checkpoint that can be identified without its directory.
@@ -602,6 +714,7 @@ def main() -> None:
                     "spectral_downsample": str(args.spectral_downsample),
                     "val_metrics": metrics,
                     "val_metrics_iter": metrics_iter,
+                    "uncertainty": meta["uncertainty"],
                     "sharpness_reference": reference}, path)
 
     @torch.no_grad()
@@ -663,13 +776,22 @@ def main() -> None:
                 "sharpness": 0.0, "hf_energy": 0.0}
         narrow = {"ssim": 0.0, "lpips": 0.0, "sam_hr": 0.0, "ergas": 0.0}
         n_wide = n_narrow = 0
+        # The sigma-collapse monitor, over the same val batches as PSNR.
+        monitor = LogvarMonitor(args.logvar_min, args.logvar_max) if uncertainty_on else None
+        nll_sum = 0.0
         for i, b in enumerate(val_dl):
             if i >= args.val_batches:
                 break
             lr_, hr = b["lr"].to(dev, non_blocking=True), b["hr"].to(dev, non_blocking=True)
             with torch.cuda.amp.autocast(enabled=bool(args.amp) and dev == "cuda"):
-                sr = model(lr_)
-            sr = sr.float()
+                out = model(lr_)
+            if uncertainty_on:
+                sr, logvar = out[0].float(), out[1].float()
+                monitor.update(logvar)
+                nll_sum += float(gaussian_nll(sr, logvar, hr.float(),
+                                              args.logvar_min, args.logvar_max))
+            else:
+                sr = out.float()
 
             wide["psnr"] += psnr(sr, hr)
             parts = spectral_terms(sr, lr_.float(), mode=args.spectral_downsample)
@@ -698,6 +820,9 @@ def main() -> None:
 
         vals = {key: value / max(1, n_wide) for key, value in wide.items()}
         vals.update({key: value / max(1, n_narrow) for key, value in narrow.items()})
+        if uncertainty_on:
+            vals["nll"] = nll_sum / max(1, n_wide)
+            vals.update({f"logvar_{k}": v for k, v in monitor.summary().items()})
         bad = sorted(key for key, value in vals.items() if not math.isfinite(value))
         if bad:
             raise ValueError(
@@ -802,8 +927,18 @@ def main() -> None:
             g["lr"] = lr_at(it, args)
         epoch, b = next(it_stream)
         lr_, hr = b["lr"].to(dev, non_blocking=True), b["hr"].to(dev, non_blocking=True)
+        # 0.0 throughout for a run without the head; see src/losses/nll.py.
+        nll_w = (nll_weight_at(it, args.nll_warmup, args.nll_ramp, args.nll_weight)
+                 if uncertainty_on else 0.0)
         with torch.cuda.amp.autocast(enabled=bool(args.amp) and dev == "cuda"):
-            sr = model(lr_)
+            if uncertainty_on:
+                # detach_var during the warmup: the variance branch gets no
+                # path to the trunk, and with nll_w == 0 no loss term either,
+                # so the reconstruction trains exactly as a Day 3 run's.
+                sr, logvar = model(lr_, detach_var=(nll_w == 0.0))
+            else:
+                # The control path, unchanged: same graph as A2/B1/B2.
+                sr = model(lr_)
             loss = F.l1_loss(sr, hr)
         if spectral_on:
             # Outside autocast, in float32: see validate(). The branch is
@@ -822,6 +957,15 @@ def main() -> None:
             # cross-run comparisons are val_psnr and the unweighted
             # val_l1_spec / val_sam, which mean the same thing in both.
             loss = loss + spec
+        if nll_w > 0.0:
+            # float32, outside autocast: squared reflectance residuals of 1e-6
+            # sit below fp16's normal range. From here `loss` is L1 + w*NLL,
+            # and NLL is negative in reflectance units (logvar ~ -9), so the
+            # loss column can go below zero; compare runs on val columns.
+            with torch.cuda.amp.autocast(enabled=False):
+                nll = gaussian_nll(sr.float(), logvar.float(), hr.float(),
+                                   args.logvar_min, args.logvar_max)
+            loss = loss + nll_w * nll
         opt.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
         if args.clip > 0:
@@ -878,6 +1022,29 @@ def main() -> None:
                 f"{reference['hr_hf_energy']:.6f})",
                 flush=True,
             )
+            if uncertainty_on:
+                # The Day 4 kill-criterion signal, on its own line so it can be
+                # grepped out of a live log. spatial_std -> 0 is sigma collapse;
+                # clamp_lo is EXPECTED to be non-zero (see src/losses/nll.py).
+                print(
+                    f"[sigma] it {it+1} nll_w {nll_w:.4f} nll {vals['nll']:.5f} "
+                    f"logvar mean {vals['logvar_mean']:.4f} min {vals['logvar_min']:.4f} "
+                    f"max {vals['logvar_max']:.4f} spatial_std "
+                    f"{vals['logvar_spatial_std']:.5f} clamp lo "
+                    f"{vals['logvar_clamp_lo_frac']:.4f} hi "
+                    f"{vals['logvar_clamp_hi_frac']:.4f}",
+                    flush=True,
+                )
+                unc_cells = [
+                    f"{vals['nll']:.6f}", f"{nll_w:.6f}",
+                    f"{vals['logvar_mean']:.6f}", f"{vals['logvar_min']:.6f}",
+                    f"{vals['logvar_max']:.6f}", f"{vals['logvar_spatial_std']:.8f}",
+                    f"{vals['logvar_clamp_lo_frac']:.6f}",
+                    f"{vals['logvar_clamp_hi_frac']:.6f}",
+                ]
+            else:
+                # Blank, not zero: never measured on a run without the head.
+                unc_cells = [""] * (len(LOG_COLUMNS) - len(REFERENCE_COLUMNS))
             with log_path.open("a", newline="") as f:
                 csv.writer(f).writerow(
                     [it + 1, "", "", f"{v:.4f}", "",
@@ -886,6 +1053,7 @@ def main() -> None:
                      f"{vals['sharpness']:.8f}", f"{vals['hf_energy']:.8f}",
                      f"{vals['ssim']:.6f}", f"{vals['lpips']:.6f}",
                      f"{vals['sam_hr']:.6f}", f"{vals['ergas']:.6f}"]
+                    + unc_cells
                 )
             # Checkpoint selection stays on PSNR alone, unchanged from Run A and
             # identical in both runs. Selecting on the combined objective would
@@ -917,6 +1085,7 @@ def main() -> None:
         "git_dirty": meta["git_dirty"],
         "lambdas": meta["lambdas"],
         "spectral_downsample": str(args.spectral_downsample),
+        "uncertainty": meta["uncertainty"],
         "iters_requested": int(args.iters),
         "iters_completed": int(last_vals_it) if last_vals_it else None,
         "best_val_psnr": float(best),

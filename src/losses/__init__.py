@@ -7,6 +7,7 @@ The implementation lives in :mod:`src.losses.spectral` rather than in a flat
 review. Re-exporting here keeps the one-line import the design called for.
 """
 
+from src.losses.nll import gaussian_nll, nll_weight_at
 from src.losses.spectral import (
     ANTIALIASED_MODES,
     DEFAULT_COS_CLAMP,
@@ -35,4 +36,6 @@ __all__ = [
     "spectral_terms",
     "spectral_consistency",
     "spectral_settings_from_cfg",
+    "gaussian_nll",
+    "nll_weight_at",
 ]

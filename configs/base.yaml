@@ -560,6 +560,71 @@ loss:
     # real land surface produces.
     min_norm: 1.0e-6
 
+# Heteroscedastic uncertainty head + NLL -- technical contribution 2. Implemented
+# in src/models/edsr.py (the head) and src/losses/nll.py (objective, warmup).
+#
+# THESE ARE DEFAULTS, NOT A FROZEN RUN. src/train.py mirrors every value as an
+# argparse default (--uncertainty, --var-feats, --logvar-*, --nll-*) and
+# tests/test_uncertainty_head.py asserts they agree. The head is OFF by
+# default so every Day 3 invocation trains exactly what it did; Run C (Day 4)
+# gets its own frozen config. configs/frozen_day3.yaml is not touched by this.
+uncertainty:
+  enabled: false
+  # Hidden width of the conv-ReLU-conv log-variance head on the HR features.
+  # +7,508 params at n_feats 48 -> 863,160 total, inside runtime.max_parameters.
+  var_feats: 16
+  # Natural-log variance of reflectance. -10 is sigma 0.0067 reflectance; see
+  # src/losses/nll.py for why a healthy head will put pixels ON this floor.
+  logvar_min: -10.0
+  logvar_max: 10.0
+  # Initial constant log-variance. Run A's L1 of 0.0088 is a Gaussian sigma of
+  # ~0.011, i.e. ln(0.011^2) = -9.0. Starting there matters: Adam moves the
+  # bias ~lr per step, so from ~0 the head could not reach -9 inside the ramp.
+  logvar_init: -9.0
+  nll:
+    # Final NLL weight, applied ON TOP of the L1 term (which is kept).
+    weight: 1.0
+    # Pure L1, variance branch detached from the trunk.
+    warmup_iters: 2000
+    # Linear 0 -> weight.
+    ramp_iters: 2000
+
+# scripts/calibrate_uncertainty.py -- is TTA disagreement monotone against error?
+# See src/eval/calibration.py for the binning and the control predictor.
+calibrate_uncertainty:
+  # Default checkpoint; --checkpoint overrides. Run A: B did not exist when
+  # this was first needed, and the question (is TTA disagreement monotone
+  # against error at all?) is a property Run A can answer.
+  checkpoint: runs/runA/best.pt
+  fabricate_checkpoint: false
+  # Images per forward call inside TTA (8 x batch_size are stacked). 16 keeps a
+  # 64-feature x4 model's HR feature maps near 1-2 GB on CPU. null = unchunked.
+  chunk_size: 16
+  # Equal-mass bins on the reported curve.
+  n_bins: 20
+  # The exact streaming histogram the bins are merged from: log10 of the
+  # predictor, 8 decades at 2.3% resolution. Under/overflow are kept as bins.
+  fine_bins:
+    log10_min: -7.0
+    log10_max: 1.0
+    n: 800
+  # Sparsification grid (fraction of most-uncertain pixels removed).
+  sparsification_step: 0.01
+  sparsification_max: 0.99
+  progress_every: 10
+  # {tag} = <checkpoint dir>_<checkpoint stem> unless --tag is given.
+  report_md: reports/day3_tta_calibration_{tag}.md
+  report_json: reports/day3_tta_calibration_{tag}.json
+  figure_path: reports/figures/day3_tta_calibration_{tag}.png
+  # Same validated palette slots and surfaces as eval_all_ckpts.figure.
+  figure:
+    colors: {tta_std: "#2a78d6", sr_gradient: "#eb6834"}
+    surface: "#fcfcfb"
+    ink: "#0b0b0b"
+    ink_secondary: "#52514e"
+    muted: "#898781"
+    dpi: 150
+
 # The irreducible spectral floor, measured by scripts/spectral_floor.py over the
 # full validation split with GROUND-TRUTH HR in place of an SR output.
 spectral_floor:
@@ -1064,6 +1129,16 @@ smoke:
     figure: {path: outputs/figures/day3_consistency_vs_iter_smoke.png}
     report_md: outputs/metrics/day3_results_smoke.md
     report_json: outputs/metrics/day3_results_smoke.json
+  calibrate_uncertainty:
+    # A tiny random-weight checkpoint written in src/train.py's format and
+    # read back through model_from_checkpoint, so the loading path is exercised
+    # rather than skipped. Separate paths so stub numbers never land in reports/.
+    fabricate_checkpoint: true
+    checkpoint: outputs/calibrate_uncertainty_smoke/smoke.pt
+    report_md: outputs/metrics/tta_calibration_{tag}_smoke.md
+    report_json: outputs/metrics/tta_calibration_{tag}_smoke.json
+    figure_path: outputs/figures/tta_calibration_{tag}_smoke.png
+    n_bins: 8
   train:
     batch_size: 2
     num_workers: 0

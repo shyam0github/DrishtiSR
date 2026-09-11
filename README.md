@@ -221,5 +221,33 @@ Caveats, stated:
 - The 36-tile AOI budget is sized to Delhi AOI A, not to a measured latency: the
   INT8 CPU benchmark does not exist yet.
 
-**Next:** SR backbone + heteroscedastic uncertainty head under the 1M-parameter
-budget, then ONNX export and INT8 CPU benchmarking.
+**The fallback uncertainty raster is already shippable: TTA disagreement is
+monotone against error.** Before training the heteroscedastic head (Run C), the
+fallback was measured on Run A's checkpoint: run the model under all 8 dihedral
+transforms, invert each exactly, and take the per-pixel std. Over the full
+validation split (1,199 patches, 314 M pixel-band values), binned into 20
+equal-mass bins of that std, MAE against the HR rises in **every one of 19
+steps, in every band** (Spearman 1.000; the most-uncertain bin's MAE is 11.5×
+the least's). See [reports/day3_tta_calibration_runA_best.md](reports/day3_tta_calibration_runA_best.md).
+
+| predictor | monotone | top/bottom MAE | AUSE ↓ | AUSE / random ↓ |
+|---|---|---|---|---|
+| TTA std | 19/19 steps | 11.5× | **0.243** | **0.347** |
+| SR gradient magnitude (control) | 19/19 steps | 9.5× | 0.266 | 0.379 |
+
+Stated rather than buried: **most of that ranking is texture.** A free edge
+detector on the SR output is also monotone and gets within 9% of TTA's AUSE, so
+TTA's added information beyond "edges are hard" is real but modest. And the std
+is not a calibrated sigma: RMSE runs 5–19× the std, with the ratio falling as
+the std rises, so a single scale factor will not calibrate it. What it gives is
+a ranking. 19.9% of pixel mass has an implied log-variance below the NLL head's
+−10 clamp floor, so a healthy Run C head will put about a fifth of the raster
+on that bound, and that alone is not collapse.
+
+The head itself (`--uncertainty 1`), the NLL with its warmup, and the
+sigma-collapse monitor are implemented and tested on branch `day3-uncertainty`,
+off by default, with Day 3 checkpoints loading into the head-enabled model
+bit-identically on the SR output.
+
+**Next:** Run C (heteroscedastic head), then ONNX export and INT8 CPU
+benchmarking of both output rasters.
