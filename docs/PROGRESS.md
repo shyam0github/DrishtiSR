@@ -473,3 +473,39 @@ Note the validation curve: everything after it 8,000 was spent getting worse.
 
 Five new tests cover the guard (P100 refused, unknown value refused, CPU job not
 checked, `train` cannot return without a real entry point) and the console fix.
+
+---
+
+## Day 3 — A2 vs B results, and data validity
+
+**Source: `reports/day3_ab_metrics.csv`, `reports/day3_ab_summary.json`,
+`reports/day3_results.md`, `reports/day3_data_validity.md`.**
+
+- **Day 3 results.** Kernel `drishtisr-day3` COMPLETE with 3/3 runs, 12,000
+  iterations each, and 855,652 parameters. The runs agree unanimously on config
+  `e6082c69…` and commit **`fb8659d`** (clean). That is not the `bf7fa0f`
+  recorded at launch. The two commits differ only in
+  `scripts/verify_data_root.py` and its test, which is not a training path.
+  On the full 1199-patch val split, with the pre-declared selection rule
+  (it12000 for every run, which is also the final iterate), B1 (λ 0.1/0.02)
+  against A2:
+  - consistency (opensr refl. L1) **−33.3%**, resolved;
+  - LPIPS **+3.9%**;
+  - PSNR −0.105 dB;
+  - blur index **0.847**, so **BLUR HAZARD**.
+
+  **Verdict: the spectral loss did not help as specified.** Consistency
+  improved, but LPIPS worsened by more than 2% and the HF-energy blur index is
+  under 0.90. B2 (0.3/0.06) follows the same trend, more strongly (−58.0% /
+  +7.1% / 0.748). Sobel gradient disagrees with HF energy here: it rates B
+  sharper than A2 (0.473 vs 0.449 × GT).
+- **A2 overfitting.** Over the last 4k iterations: best val PSNR at 10,500,
+  final −0.005 dB; best LPIPS at 11,500, final +0.0006; slope +0.009 dB/1k.
+  No sustained decline, so overfitting is controlled. A 12k run cannot reveal
+  the late overfitting seen at 40k scale.
+- **Data validity: (b).** The data is real Sentinel-2 L2A LR from
+  `sen2naipv2-crosssensor`, paired with NAIP HR harmonised to Sentinel-2.
+  Per-band LR/HR statistics match by design and there is no reporting bug.
+  Over 50 pairs, per-band r is median 0.973 and RMSE 0.005–0.011. In 32/50
+  pairs, the per-band min and max DN are identical. The approved description of
+  the training data is in `reports/day3_data_validity.md` §4.

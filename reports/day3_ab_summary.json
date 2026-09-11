@@ -1,0 +1,128 @@
+{
+  "seed": 42,
+  "n_val": 1199,
+  "hf_cutoff": 0.25,
+  "gt_sobel": 0.06905741873799238,
+  "gt_hf": 0.16633895570855026,
+  "bicubic_hf": 0.010324487454872314,
+  "metadata": {
+    "a2": {
+      "params": 855652,
+      "config_hash": "e6082c69bba3086aaf71d0a413e64d621d860e5506da507ce2d76edb92f1fc0a",
+      "git_sha": "fb8659d5e8b2d858b0d16c3f88555d9e5f1cb2ac",
+      "git_dirty": false,
+      "lambda1": 0.0,
+      "lambda2": 0.0,
+      "iters_completed": 12000
+    },
+    "b1": {
+      "params": 855652,
+      "config_hash": "e6082c69bba3086aaf71d0a413e64d621d860e5506da507ce2d76edb92f1fc0a",
+      "git_sha": "fb8659d5e8b2d858b0d16c3f88555d9e5f1cb2ac",
+      "git_dirty": false,
+      "lambda1": 0.1,
+      "lambda2": 0.02,
+      "iters_completed": 12000
+    },
+    "b2": {
+      "params": 855652,
+      "config_hash": "e6082c69bba3086aaf71d0a413e64d621d860e5506da507ce2d76edb92f1fc0a",
+      "git_sha": "fb8659d5e8b2d858b0d16c3f88555d9e5f1cb2ac",
+      "git_dirty": false,
+      "lambda1": 0.3,
+      "lambda2": 0.06,
+      "iters_completed": 12000
+    }
+  },
+  "metadata_flags": [
+    "a2: git SHA fb8659d != expected bf7fa0f",
+    "b1: git SHA fb8659d != expected bf7fa0f",
+    "b2: git SHA fb8659d != expected bf7fa0f"
+  ],
+  "provenance_unanimous": true,
+  "verdicts": {
+    "b1_selected": {
+      "blur_index": 0.8466161459386544,
+      "blur_hazard": true,
+      "lpips_rel_change": 0.03922887871685874,
+      "consistency_rel_change": -0.3326957849552086,
+      "failed": [
+        "LPIPS worse by +3.9% (> 2%)",
+        "BLUR HAZARD (blur index 0.847 < 0.9)"
+      ],
+      "spectral_loss_helped": false
+    },
+    "b2_selected": {
+      "blur_index": 0.7483876089187533,
+      "blur_hazard": true,
+      "lpips_rel_change": 0.07097510171997036,
+      "consistency_rel_change": -0.5797255878784701,
+      "failed": [
+        "LPIPS worse by +7.1% (> 2%)",
+        "BLUR HAZARD (blur index 0.748 < 0.9)"
+      ],
+      "spectral_loss_helped": false
+    },
+    "b1_final": {
+      "blur_index": 0.8466161459386544,
+      "blur_hazard": true,
+      "lpips_rel_change": 0.03922887871685874,
+      "consistency_rel_change": -0.3326957849552086,
+      "failed": [
+        "LPIPS worse by +3.9% (> 2%)",
+        "BLUR HAZARD (blur index 0.847 < 0.9)"
+      ],
+      "spectral_loss_helped": false
+    },
+    "b2_final": {
+      "blur_index": 0.7483876089187533,
+      "blur_hazard": true,
+      "lpips_rel_change": 0.07097510171997036,
+      "consistency_rel_change": -0.5797255878784701,
+      "failed": [
+        "LPIPS worse by +7.1% (> 2%)",
+        "BLUR HAZARD (blur index 0.748 < 0.9)"
+      ],
+      "spectral_loss_helped": false
+    }
+  },
+  "overfitting": {
+    "final_iter": 12000,
+    "window_iters": 4000,
+    "val_psnr": {
+      "best_iter": 10500,
+      "best": 35.3034,
+      "final": 35.2983,
+      "final_minus_best": -0.005100000000005878,
+      "window_first_iter": 8000,
+      "window_first": 35.2655,
+      "window_slope_per_1k": 0.009223333333332438,
+      "sustained_decline": false
+    },
+    "val_lpips": {
+      "best_iter": 11500,
+      "best": 0.378808,
+      "final": 0.379436,
+      "final_minus_best": 0.0006280000000000174,
+      "window_first_iter": 8000,
+      "window_first": 0.379554,
+      "window_slope_per_1k": -7.090000000000541e-05,
+      "sustained_decline": false
+    },
+    "overfitting_controlled": true
+  },
+  "selection": {
+    "a2": {
+      "selected": "it12000",
+      "final": "it12000"
+    },
+    "b1": {
+      "selected": "it12000",
+      "final": "it12000"
+    },
+    "b2": {
+      "selected": "it12000",
+      "final": "it12000"
+    }
+  }
+}

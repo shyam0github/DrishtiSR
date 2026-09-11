@@ -53,6 +53,9 @@ outputs/**
 # 2026-09-06. Generated notebooks land here too and are build artefacts.
 outputs/kaggle/
 outputs/kaggle_kernels/
+# Raw `kaggle kernels output` downloads. The run files are tracked under runs/day3/
+# (verified byte-identical 2026-09-11); this tree also carries a repo clone.
+runs/kaggle/
 
 # Real Sentinel-2 scenes over Delhi NCR, fetched by scripts/fetch_delhi.py.
 # Imagery plus its manifest. The *.tif rule at the top of this file already
