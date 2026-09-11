@@ -1,0 +1,94 @@
+{
+  "what": "P5 Novelty 1 consistency projection gate: A2 single pass vs sr + U(lr - D(sr)) iterated, D = down4 area, U = eval bicubic",
+  "passed": false,
+  "iters": null,
+  "gate": {
+    "rule": "LPIPS_proj <= 1.01*LPIPS_A2 AND HF_proj >= 0.95*HF_A2 AND spec_l1_proj <= 0.5*spec_l1_A2; smallest passing iters; pre-registered",
+    "lpips_max_ratio": 1.01,
+    "hf_min_ratio": 0.95,
+    "spec_l1_max_ratio": 0.5,
+    "per_variant": {
+      "proj1": {
+        "lpips_ratio": 1.0574575636787753,
+        "hf_ratio": 0.901107376958485,
+        "spec_l1_ratio": 0.15536470467615962,
+        "passed": false
+      },
+      "proj2": {
+        "lpips_ratio": 1.0665253545782651,
+        "hf_ratio": 0.9065327657995939,
+        "spec_l1_ratio": 0.055410448276391876,
+        "passed": false
+      },
+      "proj3": {
+        "lpips_ratio": 1.068796334313861,
+        "hf_ratio": 0.912043606567259,
+        "spec_l1_ratio": 0.022837106471473995,
+        "passed": false
+      }
+    }
+  },
+  "metrics": {
+    "a2": {
+      "psnr": 39.02809898265909,
+      "ssim": 0.891409243978464,
+      "sam_deg": 1.8810471860861804,
+      "ergas": 2.75779208788435,
+      "spec_l1": 0.0026428321804269216,
+      "spec_sam_deg": 0.6669038178989338,
+      "hf_ratio_vs_gt": 0.09995421803271225,
+      "lpips": 0.33297003314830365
+    },
+    "proj1": {
+      "psnr": 38.78441981738191,
+      "ssim": 0.8906845899338801,
+      "sam_deg": 1.9683160496412608,
+      "ergas": 2.841674853401845,
+      "spec_l1": 0.0004106028412206797,
+      "spec_sam_deg": 0.14302526087051823,
+      "hf_ratio_vs_gt": 0.09006948322739383,
+      "lpips": 0.35210168003104625
+    },
+    "proj2": {
+      "psnr": 38.735103305293734,
+      "ssim": 0.8901074377137297,
+      "sam_deg": 1.999623416924025,
+      "ergas": 2.859564485663748,
+      "spec_l1": 0.0001464405158367299,
+      "spec_sam_deg": 0.0565305430310454,
+      "hf_ratio_vs_gt": 0.09061177372653027,
+      "lpips": 0.35512098266743125
+    },
+    "proj3": {
+      "psnr": 38.720340889755825,
+      "ssim": 0.8898793443580735,
+      "sam_deg": 2.010451736638527,
+      "ergas": 2.8649078721734997,
+      "spec_l1": 6.035463989064738e-05,
+      "spec_sam_deg": 0.03372690125941665,
+      "hf_ratio_vs_gt": 0.09116260550616503,
+      "lpips": 0.35587715086527166
+    }
+  },
+  "metric_notes": {
+    "hf_ratio_vs_gt": "per-patch hf_energy_ratio(x)/hf_energy_ratio(HR), mean",
+    "spec_l1": "training operator (down4 area) vs LR, reflectance",
+    "opensr_reflectance": "opensr-test reflectance consistency (headline measure)"
+  },
+  "opensr": {
+    "ran": false,
+    "projected_seconds": 739.5351199995882,
+    "reason": "projected 740s > 600s budget"
+  },
+  "n": 200,
+  "n_samples": 200,
+  "core_seconds": 213.70388390000153,
+  "checkpoint_id": "a2-last-dce224ec",
+  "checkpoint_path": "D:\\SIH\\DrishtiSR\\runs\\day3\\a2\\last.pt",
+  "git_sha": "4978e0597ad87e8fc8cd064a792c16dee5b7c171",
+  "git_dirty": true,
+  "split": "val",
+  "seed": 26142,
+  "interim": false,
+  "timestamp_utc": "2026-09-11T18:47:12+00:00"
+}
