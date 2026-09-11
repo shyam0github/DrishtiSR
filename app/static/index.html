@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DrishtiSR · Sentinel-2 10 m → 2.5 m</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header id="app-header">
+    <div class="brand">
+      <span class="brand-name">DrishtiSR</span>
+      <span class="brand-sub">Sentinel-2 10 m → 2.5 m</span>
+      <span class="team">Turing Testers</span>
+    </div>
+    <div class="header-right">
+      <span id="mock-chip" class="chip chip-mock" hidden>MOCK DATA (?mock=1)</span>
+      <span id="interim-chip" class="chip chip-amber" hidden>INTERIM checkpoint</span>
+      <span id="model-badge" class="model-badge" title="">
+        <span id="model-backend">model …</span>
+        <span class="sep">·</span><span id="model-params" class="num">–</span>
+        <span class="sep">·</span><span id="model-size" class="num">–</span>
+        <span class="sep">·</span><span id="model-threads" class="num">–</span>
+      </span>
+      <span id="backend-status" class="status status-checking">checking API…</span>
+    </div>
+  </header>
+
+  <main id="layout">
+    <!-- ───────── Input ───────── -->
+    <aside id="input-panel" class="panel">
+      <section>
+        <h2>Sample</h2>
+        <div id="sample-list" class="sample-list"><p class="muted">Loading samples…</p></div>
+      </section>
+
+      <section>
+        <h2>Or upload a GeoTIFF</h2>
+        <label id="drop-zone" class="drop-zone" for="file-input">
+          <span>Drop a 4-band <b>.tif</b> here (B04, B03, B02, B08)</span>
+          <span class="muted small">or click to choose · LR side 32–512 px</span>
+          <span id="file-name" class="file-name"></span>
+        </label>
+        <input id="file-input" type="file" accept=".tif,.tiff" hidden>
+      </section>
+
+      <section class="form-grid">
+        <label for="tta-select">Uncertainty TTA</label>
+        <select id="tta-select">
+          <option value="0">Off</option>
+          <option value="4" selected>4 passes</option>
+          <option value="8">8 passes</option>
+        </select>
+        <label for="dn-select">DN mode</label>
+        <select id="dn-select">
+          <option value="auto" selected>Auto</option>
+          <option value="reflectance">Reflectance</option>
+          <option value="dn10000">DN ÷ 10000</option>
+          <option value="dn10000_offset1000">DN ÷ 10000 with −1000 offset (L2A baseline ≥ 04.00)</option>
+        </select>
+      </section>
+
+      <section>
+        <button id="run-btn" class="btn-primary" type="button">Run super-resolution</button>
+        <div id="run-status" class="run-status" aria-live="polite"></div>
+        <div id="error-box" class="error-box" role="alert" hidden></div>
+      </section>
+
+      <section id="downloads" hidden>
+        <h2>Downloads</h2>
+        <a id="dl-sr" class="dl" href="#" download>SR GeoTIFF (2.5 m)</a>
+        <a id="dl-unc" class="dl" href="#" download>Uncertainty GeoTIFF</a>
+        <p id="dl-note" class="muted small" hidden></p>
+      </section>
+
+      <details id="novel" class="novel">
+        <summary>What’s novel</summary>
+        <dl>
+          <dt>Spectral consistency, measured on every result</dt>
+          <dd>The SR output is re-degraded with the training operator and compared with the 10 m input, pixel by pixel.
+            <button type="button" class="goto" data-goto="consistency">Evidence: consistency card + overlay</button>
+            <span class="muted">A warnings note appears when the consistency projection is applied.</span></dd>
+          <dt>Per-pixel uncertainty map</dt>
+          <dd>Where the model is unsure (TTA disagreement or a learned σ), shown on a fixed scale, never min–max.
+            <button type="button" class="goto" data-goto="uncertainty">Evidence: uncertainty overlay + legend</button></dd>
+          <dt>≤ 1 M parameters, INT8, CPU-only</dt>
+          <dd>A compact EDSR that runs on a laptop CPU with no GPU; size, backend and threads are in the header.
+            <button type="button" class="goto" data-goto="model">Evidence: model badge + runtime</button></dd>
+        </dl>
+      </details>
+
+      <section class="about">
+        <h2>About the data</h2>
+        <p class="small">Real Sentinel-2 L2A 10 m inputs (B04, B03, B02, B08) paired with 2.5 m NAIP targets that the SEN2NAIPv2 authors co-registered and radiometrically harmonised to Sentinel-2 (crosssensor subset). Inputs are not synthetically degraded; matching per-band statistics between inputs and targets are expected from this harmonisation.</p>
+        <p class="small">A training-time spectral loss was tested and rejected (it traded sharpness for consistency); consistency is measured on every result.</p>
+      </section>
+    </aside>
+
+    <!-- ───────── Viewer ───────── -->
+    <section id="viewer" class="panel viewer">
+      <div class="toolbar">
+        <label>Left
+          <select id="left-layer">
+            <option value="lr" selected>LR 10 m (nearest)</option>
+            <option value="bicubic">Bicubic ×4</option>
+            <option value="hr">HR 2.5 m reference</option>
+          </select>
+        </label>
+        <div class="seg" role="group" aria-label="Band combination">
+          <button id="mode-rgb" type="button" class="seg-btn active">RGB</button>
+          <button id="mode-fcc" type="button" class="seg-btn">False colour</button>
+        </div>
+        <label>Overlay
+          <select id="overlay-select">
+            <option value="none" selected>None</option>
+            <option value="uncertainty">Uncertainty</option>
+            <option value="consistency">Spectral consistency</option>
+          </select>
+        </label>
+        <label class="opacity">Opacity
+          <input id="overlay-opacity" type="range" min="0" max="100" value="65">
+          <span id="opacity-value" class="num">65 %</span>
+        </label>
+        <span class="spacer"></span>
+        <span id="zoom-readout" class="num muted">1.0×</span>
+        <button id="reset-view" type="button" class="btn">Reset view</button>
+      </div>
+
+      <div id="stage" class="stage" tabindex="0" aria-label="Comparison viewer: wheel to zoom, drag to pan, arrow keys move the slider, O cycles overlays">
+        <div class="layer">
+          <div id="left-inner" class="layer-inner">
+            <img id="left-img" alt="" draggable="false">
+          </div>
+        </div>
+        <div id="right-pane" class="layer">
+          <div id="right-inner" class="layer-inner">
+            <img id="right-img" alt="" draggable="false">
+            <img id="overlay-img" class="overlay" alt="" draggable="false" hidden>
+          </div>
+        </div>
+        <div id="slider-handle" class="handle" role="slider" tabindex="0" aria-label="Comparison split" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span class="grip"></span></div>
+        <span id="left-label" class="stage-label left"></span>
+        <span id="sr-label" class="stage-label ai">AI-reconstructed 2.5 m — not a measurement</span>
+        <div id="empty-state" class="empty-state">
+          <p>Pick a sample or drop a GeoTIFF, then press <b>Run</b>.</p>
+          <p class="muted small">Wheel = zoom · drag = pan · ←/→ = slider · O = overlay</p>
+        </div>
+      </div>
+
+      <div class="viewer-foot">
+        <div id="legend" class="legend" hidden>
+          <span id="legend-title" class="legend-title"></span>
+          <div class="legend-scale">
+            <div id="legend-bar" class="legend-bar"></div>
+            <div id="legend-ticks" class="legend-ticks"></div>
+          </div>
+        </div>
+        <span id="result-meta" class="muted small num"></span>
+      </div>
+    </section>
+
+    <!-- ───────── Metrics ───────── -->
+    <aside id="metrics-panel" class="panel">
+      <h2>Metrics</h2>
+      <div id="blur-banner" class="banner banner-amber" role="status" hidden></div>
+      <div id="metrics-body"><p class="muted">No result yet.</p></div>
+      <div id="warnings-block" hidden>
+        <h3>Warnings</h3>
+        <ul id="warnings-list" class="warnings"></ul>
+      </div>
+    </aside>
+  </main>
+</body>
+</html>
