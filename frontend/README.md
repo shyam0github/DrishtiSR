@@ -14,6 +14,20 @@ npm run test:e2e     # real Chrome: swipe by mouse AND touch, AOI, badge
 npm run build        # typecheck + production bundle
 ```
 
+## Routes and design system
+
+- `src/routes.ts` is the site map: one list drives both the router
+  (`src/main.tsx`, react-router) and the sticky top nav (`src/layout/`).
+- `/` `/novelty/spectral` `/novelty/uncertainty` `/novelty/efficiency`
+  `/compare` `/about` are placeholders until page content lands.
+- `/demo` is the full-screen map demo (the old `/`), which `npm run test:e2e`
+  exercises. `/design` is the component reference (sample numbers only).
+- Tokens (colour, type scale, spacing, radii, shadows/glows, motion) live in
+  `src/index.css` `@theme`. Components live in `src/components/ui/`: StatCard,
+  MetricBar, Gauge, SectionHeader, BeforeAfterSlider (+ zoom/pan Lightbox),
+  TabbedPanel, Badge, Skeleton, Reveal and Card. Pages should compose these
+  and never add raw hex values.
+
 ## Where things come from
 
 - **Settings** come from `configs/base.yaml`: the `frontend:` block, plus

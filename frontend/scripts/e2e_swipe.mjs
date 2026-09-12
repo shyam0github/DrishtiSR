@@ -248,8 +248,10 @@ async function phone(browser, url) {
 
 const server = await createServer({ root: FRONTEND_ROOT, logLevel: "warn", server: { strictPort: false } });
 await server.listen();
-const url = server.resolvedUrls?.local[0];
-assert.ok(url, "vite did not report a local URL");
+const root = server.resolvedUrls?.local[0];
+assert.ok(root, "vite did not report a local URL");
+// The map demo lives at /demo since the router landed; / is the marketing shell.
+const url = new URL("demo", root).href;
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 try {
   await desktop(browser, url);
