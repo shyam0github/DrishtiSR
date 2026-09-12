@@ -1,5 +1,7 @@
 import { useEffect } from "react";
-import { Outlet, ScrollRestoration, useLocation } from "react-router";
+import { Link, Outlet, ScrollRestoration, useLocation } from "react-router";
+import { Icon } from "../components/ui";
+import { APP_CONFIG } from "../config";
 import { NAV_ROUTES } from "../routes";
 import { TopNav, Wordmark } from "./TopNav";
 
@@ -20,10 +22,29 @@ export function AppShell() {
       <main id="main" key={pathname} className="flex-1 animate-route-in">
         <Outlet />
       </main>
-      <footer className="border-t border-line">
-        <div className="page-container flex flex-col gap-4 py-10 text-caption text-fg-subtle sm:flex-row sm:items-center sm:justify-between">
-          <Wordmark />
-          <p>Sentinel-2 10 m → 2.5 m super-resolution · SIH26142</p>
+      <footer className="border-t border-line" data-testid="site-footer">
+        <div className="page-container flex flex-col gap-6 py-10 text-caption text-fg-subtle md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-2">
+            <Wordmark />
+            <p>
+              Team <span className="font-medium text-fg-muted">{APP_CONFIG.teamName}</span> · Smart India Hackathon 2026 ·{" "}
+              <span className="num text-fg-muted">SIH26142</span>
+            </p>
+          </div>
+          <nav aria-label="Footer" className="flex flex-wrap items-center gap-1">
+            <Link to="/about" className="rounded-sm px-3 py-1.5 font-medium text-fg-muted transition-colors hover:bg-ink-800 hover:text-fg">
+              About
+            </Link>
+            <a
+              href={APP_CONFIG.repoUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-sm px-3 py-1.5 font-medium text-fg-muted transition-colors hover:bg-ink-800 hover:text-fg"
+            >
+              <Icon name="github" />
+              GitHub
+            </a>
+          </nav>
         </div>
       </footer>
       <ScrollRestoration />

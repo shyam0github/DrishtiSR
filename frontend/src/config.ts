@@ -22,6 +22,10 @@ export interface FrontendConfig {
   tile: { lrPx: number; overlapLrPx: number; maxTiles: number };
   /** runtime.max_parameters: the model budget, shown against each row's parameter count. */
   maxParameters: number;
+  /** frontend.api.proxy_target: where the dev server proxies /api and /files (app/server.py). */
+  apiProxyTarget: string;
+  teamName: string;
+  repoUrl: string;
   placeholder: { hrPx: number; seed: number };
 }
 

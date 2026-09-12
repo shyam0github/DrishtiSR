@@ -2048,6 +2048,17 @@ frontend:
   # to the pixel dimensions. 2 = uint16, tiled.py's --out-dtype default.
   output_bytes_per_band: 2
 
+  # The FastAPI MVP server (scripts/serve.py; its --host/--port defaults). It
+  # refuses cross-origin POSTs, so `npm run dev` proxies /api and /files to it
+  # and the page stays same-origin. If serve.py picked another free port, set
+  # this to match.
+  api:
+    proxy_target: "http://127.0.0.1:8000"
+
+  # Identity shown in the site footer.
+  team_name: "Turing Testers"
+  repo_url: "https://github.com/shyam0github/DrishtiSR"
+
   # Procedural placeholder imagery for the swipe slider (MOCK_MODE only),
   # written by frontend/scripts/make_placeholders.mjs (gitignored). The 2.5 m
   # image is hr_px square; the 10 m image is its exact sr.scale x sr.scale

@@ -1,10 +1,12 @@
 export { Badge, type BadgeVariant } from "./Badge";
 export { BeforeAfterSlider, type ComparePair } from "./BeforeAfterSlider";
+export { Button, ButtonAnchor, ButtonLink, buttonClass, type ButtonVariant } from "./Button";
 export { Card } from "./Card";
+export { Icon, type IconName } from "./Icon";
 export { Lightbox } from "./Lightbox";
 export { Gauge, MetricBar } from "./MetricBar";
 export { Reveal } from "./Reveal";
 export { SectionHeader } from "./SectionHeader";
 export { ImageSkeleton, Skeleton, StatCardSkeleton } from "./Skeleton";
-export { StatCard, type StatDelta } from "./StatCard";
+export { PendingStatCard, StatCard, type StatDelta } from "./StatCard";
 export { TabbedPanel, type Tab } from "./TabbedPanel";

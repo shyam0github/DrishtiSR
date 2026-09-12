@@ -18,7 +18,16 @@ npm run build        # typecheck + production bundle
 
 - `src/routes.ts` is the site map: one list drives both the router
   (`src/main.tsx`, react-router) and the sticky top nav (`src/layout/`).
-- `/` `/novelty/spectral` `/novelty/uncertainty` `/novelty/efficiency`
+- `/` is the Home page (`src/pages/HomePage.tsx`): hero, upload + swipe viewer
+  with zoom lightbox, per-image metrics, novelty cards, impact strip. Its
+  upload talks to the MVP API (`app/server.py`, `POST /api/upscale`) through
+  the dev proxy (`frontend.api.proxy_target`; override with
+  `DRISHTI_API_TARGET` when serve.py picks another port). The result lives in
+  `src/state/ResultContext.tsx` so every page can read "this image".
+  Repo-wide numbers come from `src/data/facts.ts`, which `tests/facts.test.ts`
+  checks against the reports. `npm run test:e2e:home` (add `E2E_LIVE=1` to hit
+  the live API) drives it in Chrome.
+- `/novelty/spectral` `/novelty/uncertainty` `/novelty/efficiency`
   `/compare` `/about` are placeholders until page content lands.
 - `/demo` is the full-screen map demo (the old `/`), which `npm run test:e2e`
   exercises. `/design` is the component reference (sample numbers only).

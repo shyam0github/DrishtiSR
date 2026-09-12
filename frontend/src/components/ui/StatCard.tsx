@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { formatNumber, useCountUp, useInView } from "../../design/motion";
+import { Badge } from "./Badge";
 import { Card } from "./Card";
 
 export interface StatDelta {
@@ -27,6 +28,7 @@ export function StatCard({
   delta,
   badge,
   accent = false,
+  size = "md",
 }: {
   value: number;
   decimals?: number;
@@ -37,18 +39,21 @@ export function StatCard({
   delta?: StatDelta;
   badge?: ReactNode;
   accent?: boolean;
+  /** "sm" for dense strips (e.g. per-image metrics beside a viewer). */
+  size?: StatSize;
 }) {
   const [ref, inView] = useInView<HTMLDivElement>();
   const shown = useCountUp(value, inView);
+  const s = SIZES[size];
   return (
-    <Card accent={accent} className="flex flex-col gap-5 p-6">
+    <Card accent={accent} className={s.card}>
       <div ref={ref} className="flex items-start justify-between gap-3">
         <p className="text-caption font-medium text-fg-muted">{label}</p>
         {badge}
       </div>
       <p className="flex items-baseline gap-1.5 text-fg" aria-label={`${prefix ?? ""}${formatNumber(value, decimals)}${unit ? ` ${unit}` : ""}`}>
-        {prefix && <span className="num text-h4 text-fg-muted">{prefix}</span>}
-        <span className="num text-stat font-medium">{formatNumber(shown, decimals)}</span>
+        {prefix && <span className={`num text-fg-muted ${s.prefix}`}>{prefix}</span>}
+        <span className={`num font-medium ${s.value}`}>{formatNumber(shown, decimals)}</span>
         {unit && <span className="num text-caption text-fg-muted">{unit}</span>}
       </p>
       {(delta || hint) && (
@@ -57,6 +62,30 @@ export function StatCard({
           {hint && <span className="text-fg-subtle">{hint}</span>}
         </div>
       )}
+    </Card>
+  );
+}
+
+type StatSize = "md" | "sm";
+
+const SIZES: Record<StatSize, { card: string; value: string; prefix: string }> = {
+  md: { card: "flex flex-col gap-5 p-6", value: "text-stat", prefix: "text-h4" },
+  sm: { card: "flex flex-col gap-3 p-4", value: "text-h3", prefix: "text-h6" },
+};
+
+/**
+ * A StatCard slot whose number does not exist yet (not measured, no reference,
+ * or no model ran). Shows the Pending badge and why, never a stand-in number.
+ */
+export function PendingStatCard({ label, reason, size = "md" }: { label: ReactNode; reason: ReactNode; size?: StatSize }) {
+  const s = SIZES[size];
+  return (
+    <Card interactive={false} className={s.card} data-testid="pending-stat">
+      <p className="text-caption font-medium text-fg-muted">{label}</p>
+      <div className={`flex items-center ${s.value}`}>
+        <Badge variant="pending">Pending</Badge>
+      </div>
+      <p className="text-caption text-fg-subtle">{reason}</p>
     </Card>
   );
 }

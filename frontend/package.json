@@ -14,7 +14,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "test:e2e": "npm run placeholders && node scripts/e2e_swipe.mjs"
+    "test:e2e": "npm run placeholders && node scripts/e2e_swipe.mjs",
+    "test:e2e:home": "npm run placeholders && node scripts/e2e_home.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",

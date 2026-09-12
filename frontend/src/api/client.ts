@@ -224,3 +224,246 @@ export async function getMetrics(): Promise<MetricsResponse> {
   }
   return request<MetricsResponse>("/metrics");
 }
+
+// ================================ MVP API v1 (app/server.py, same origin) ====
+//
+// docs/mvp/api_contract.md. Unlike the Day 3 endpoints above these are
+// same-origin: the server refuses cross-origin POSTs, so `npm run dev` proxies
+// /api and /files to it (frontend.api.proxy_target in configs/base.yaml).
+// MOCK_MODE answers with the placeholder pair and every per-image metric null:
+// no model ran, so there is nothing to report.
+
+/** Prefix for /api and /files. Empty = same origin (the dev proxy, or a build served by app/server.py). */
+export const MVP_API_BASE: string = import.meta.env.VITE_MVP_API_BASE ?? "";
+const UPLOAD_EXTENSIONS = [".tif", ".tiff"];
+
+export interface ModelInfo {
+  backend: "onnx-int8" | "onnx-fp32" | "torch-fp32";
+  checkpoint_id: string;
+  params: number;
+  model_bytes: number;
+  threads: number;
+  interim: boolean;
+  has_scale_head: boolean;
+}
+
+export interface QualityMetrics {
+  lpips: number;
+  ssim: number;
+  psnr: number;
+  sam_deg: number;
+  ergas: number;
+}
+
+export type UncertaintyMethod = "none" | "tta4" | "tta8" | "learned_laplace";
+
+/** POST /api/upscale. Image fields are URLs of 8-bit display PNGs; metrics are in surface-reflectance units. */
+export interface UpscaleResponse {
+  job_id: string;
+  input: {
+    source: "upload" | "sample";
+    sample_id: string | null;
+    lr_size: [number, number];
+    sr_size: [number, number];
+    georeferenced: boolean;
+    dn_mode_applied: string;
+  };
+  model: ModelInfo;
+  uncertainty_method: UncertaintyMethod;
+  images: {
+    lr_rgb: string;
+    lr_fcc: string;
+    bicubic_rgb: string;
+    bicubic_fcc: string;
+    sr_rgb: string;
+    sr_fcc: string;
+    hr_rgb: string | null;
+    hr_fcc: string | null;
+    uncertainty: string | null;
+    consistency: string;
+  };
+  downloads: { sr_tif: string; uncertainty_tif: string | null };
+  metrics: {
+    reference_free: {
+      spec_l1: number;
+      spec_sam_deg: number;
+      spec_l1_bicubic: number;
+      spec_sam_bicubic_deg: number;
+      hf_ratio_vs_bicubic: number;
+      unc_mean: number | null;
+      unc_p95: number | null;
+      runtime_ms: { sr: number; uncertainty: number | null; total: number };
+    };
+    with_gt: null | {
+      sr: QualityMetrics;
+      bicubic: QualityMetrics;
+      spec_l1_hr: number;
+      spec_sam_hr_deg: number;
+      hf_ratio_hr_vs_bicubic: number;
+    };
+  };
+  refs: {
+    spec_l1_gt_floor: number;
+    spec_sam_gt_floor_deg: number;
+    unc_display_max: number;
+    cons_display_max: number;
+    sharpness_warn_below: number;
+  };
+  warnings: string[];
+}
+
+export interface SampleInfo {
+  id: string;
+  label: string;
+  thumb_url: string;
+  has_gt: boolean;
+  lr_size: [number, number];
+}
+
+export type TtaChoice = "0" | "4" | "8";
+export type UpscaleInput = { file: File } | { sampleId: string };
+
+/**
+ * Per-image metrics as the pages show them. `null` means NOT MEASURED for this
+ * image (no 2.5 m reference, or MOCK_MODE), never zero.
+ */
+export interface ImageMetrics {
+  psnr: number | null;
+  ssim: number | null;
+  lpips: number | null;
+  /** Bicubic on the same image, for deltas. Null without a reference. */
+  bicubic: Pick<QualityMetrics, "psnr" | "ssim" | "lpips"> | null;
+  /** Spectral consistency: L1 between the LR and the SR degraded back to 10 m, surface reflectance. */
+  specL1: number | null;
+  specL1Bicubic: number | null;
+  /** HF energy of SR over bicubic (bicubic = 1). Below `sharpnessWarnBelow`, a low specL1 may just be blur. */
+  hfRatioVsBicubic: number | null;
+  sharpnessWarnBelow: number | null;
+  runtimeMsTotal: number | null;
+}
+
+/** One image's result, shared app-wide through ResultContext. */
+export interface ImageResult {
+  mode: "mock" | "live";
+  jobId: string;
+  /** File name or sample label. */
+  sourceLabel: string;
+  lrSize: [number, number] | null;
+  srSize: [number, number] | null;
+  images: { lr: string; sr: string; bicubic: string | null; hr: string | null; uncertainty: string | null; consistency: string | null };
+  srTifUrl: string | null;
+  hasGroundTruth: boolean;
+  metrics: ImageMetrics;
+  model: ModelInfo | null;
+  uncertaintyMethod: UncertaintyMethod | null;
+  warnings: string[];
+  /** The full response, for pages that need fields not lifted here. Null in MOCK_MODE. */
+  raw: UpscaleResponse | null;
+}
+
+const mvpUrl = (u: string) => (u.startsWith("/") ? `${MVP_API_BASE}${u}` : u);
+const mvpUrlOrNull = (u: string | null) => (u === null ? null : mvpUrl(u));
+
+/** Lift an /api/upscale response into the shape the pages read. Pure; unit-tested. */
+export function toImageResult(resp: UpscaleResponse, sourceLabel: string): ImageResult {
+  const rf = resp.metrics.reference_free;
+  const gt = resp.metrics.with_gt;
+  return {
+    mode: "live",
+    jobId: resp.job_id,
+    sourceLabel,
+    lrSize: resp.input.lr_size,
+    srSize: resp.input.sr_size,
+    images: {
+      lr: mvpUrl(resp.images.lr_rgb),
+      sr: mvpUrl(resp.images.sr_rgb),
+      bicubic: mvpUrl(resp.images.bicubic_rgb),
+      hr: mvpUrlOrNull(resp.images.hr_rgb),
+      uncertainty: mvpUrlOrNull(resp.images.uncertainty),
+      consistency: mvpUrl(resp.images.consistency),
+    },
+    srTifUrl: mvpUrl(resp.downloads.sr_tif),
+    hasGroundTruth: gt !== null,
+    metrics: {
+      psnr: gt?.sr.psnr ?? null,
+      ssim: gt?.sr.ssim ?? null,
+      lpips: gt?.sr.lpips ?? null,
+      bicubic: gt ? { psnr: gt.bicubic.psnr, ssim: gt.bicubic.ssim, lpips: gt.bicubic.lpips } : null,
+      specL1: rf.spec_l1,
+      specL1Bicubic: rf.spec_l1_bicubic,
+      hfRatioVsBicubic: rf.hf_ratio_vs_bicubic,
+      sharpnessWarnBelow: resp.refs.sharpness_warn_below,
+      runtimeMsTotal: rf.runtime_ms.total,
+    },
+    model: resp.model,
+    uncertaintyMethod: resp.uncertainty_method,
+    warnings: resp.warnings,
+    raw: resp,
+  };
+}
+
+async function mvpRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = init?.method ?? "GET";
+  const res = await fetch(`${MVP_API_BASE}${path}`, init);
+  if (!res.ok) {
+    const body = await res.text();
+    let detail = body;
+    try {
+      detail = (JSON.parse(body) as { error?: string }).error ?? body;
+    } catch {
+      // Not the server's {"error"} envelope (a proxy error page, say): report the raw body.
+    }
+    throw new ApiError(res.status, `${method} ${path} -> HTTP ${res.status}: ${detail}`);
+  }
+  return (await res.json()) as T;
+}
+
+function mockUpscale(sourceLabel: string): ImageResult {
+  const hr = APP_CONFIG.placeholder.hrPx;
+  const lr = hr / APP_CONFIG.scale;
+  return {
+    mode: "mock",
+    jobId: `mock-${Date.now().toString(36)}`,
+    sourceLabel: `${sourceLabel} · PLACEHOLDER`,
+    lrSize: [lr, lr],
+    srSize: [hr, hr],
+    images: { lr: placeholderUrl("lr.png"), sr: placeholderUrl("hr.png"), bicubic: null, hr: null, uncertainty: placeholderUrl("uncertainty.png"), consistency: null },
+    srTifUrl: null,
+    hasGroundTruth: false,
+    metrics: { psnr: null, ssim: null, lpips: null, bicubic: null, specL1: null, specL1Bicubic: null, hfRatioVsBicubic: null, sharpnessWarnBelow: null, runtimeMsTotal: null },
+    model: null,
+    uncertaintyMethod: null,
+    warnings: ["MOCK_MODE: no model ran. The images are the procedural placeholder pair, not your upload."],
+    raw: null,
+  };
+}
+
+/**
+ * Super-resolve one uploaded 4-band GeoTIFF or one server-side sample.
+ * Throws ApiError with the server's message on any refusal; never returns a partial result.
+ */
+export async function upscale(input: UpscaleInput, sourceLabel: string, tta: TtaChoice = "4"): Promise<ImageResult> {
+  if ("file" in input) {
+    const name = input.file.name.toLowerCase();
+    if (!UPLOAD_EXTENSIONS.some((ext) => name.endsWith(ext))) {
+      throw new ApiError(400, `"${input.file.name}" is not a GeoTIFF; upload a 4-band ${UPLOAD_EXTENSIONS.join(" / ")} (${APP_CONFIG.bands.join(", ")}).`);
+    }
+  }
+  if (MOCK_MODE) {
+    await sleep(MOCK_LATENCY_MS);
+    return mockUpscale(sourceLabel);
+  }
+  const form = new FormData();
+  if ("file" in input) form.append("file", input.file);
+  else form.append("sample_id", input.sampleId);
+  form.append("tta", tta);
+  const resp = await mvpRequest<UpscaleResponse>("/api/upscale", { method: "POST", body: form });
+  return toImageResult(resp, sourceLabel);
+}
+
+/** Server-side samples (with 2.5 m ground truth where `has_gt`). Empty in MOCK_MODE. */
+export async function getSamples(): Promise<SampleInfo[]> {
+  if (MOCK_MODE) return [];
+  const { samples } = await mvpRequest<{ samples: SampleInfo[] }>("/api/samples");
+  return samples.map((s) => ({ ...s, thumb_url: mvpUrl(s.thumb_url) }));
+}

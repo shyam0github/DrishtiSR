@@ -90,6 +90,9 @@ export function loadFrontendConfig(file = BASE_YAML) {
       maxTiles: number(cfg, "frontend.tile.max_tiles", { integer: true, min: 1 }),
     },
     maxParameters: number(cfg, "runtime.max_parameters", { integer: true, min: 1 }),
+    apiProxyTarget: string(cfg, "frontend.api.proxy_target"),
+    teamName: string(cfg, "frontend.team_name"),
+    repoUrl: string(cfg, "frontend.repo_url"),
     placeholder: {
       hrPx,
       seed: number(cfg, "seed", { integer: true }),
