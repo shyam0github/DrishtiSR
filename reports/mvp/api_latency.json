@@ -1,0 +1,40 @@
+{
+  "what": "P9 API end-to-end POST /api/upscale time (TestClient, in-process) for a 128x128 TEST display sample, incl. renders, GeoTIFFs and GT metrics; median of 3 after warm-up",
+  "checkpoint_id": "a2-last-dce224ec",
+  "backend": "onnx-fp32",
+  "threads": 6,
+  "sample_id": "test-low-1",
+  "lr_size": [
+    128,
+    128
+  ],
+  "split": "test",
+  "n_samples": 1,
+  "repeats": 3,
+  "cpu_load_percent_before": 47.0,
+  "provisional": true,
+  "interim": false,
+  "results": {
+    "tta0": {
+      "request_ms_median": 2354.8456999997143,
+      "runtime_ms_sr_median": 362.30260000229464,
+      "runtime_ms_uncertainty_median": null,
+      "runtime_ms_total_median": 448.0011999985436
+    },
+    "tta4": {
+      "request_ms_median": 3142.6329999994778,
+      "runtime_ms_sr_median": 329.1301999997813,
+      "runtime_ms_uncertainty_median": 943.248899999162,
+      "runtime_ms_total_median": 1354.9347000007401
+    },
+    "tta8": {
+      "request_ms_median": 4087.316999997711,
+      "runtime_ms_sr_median": 316.181800000777,
+      "runtime_ms_uncertainty_median": 2121.0258999999496,
+      "runtime_ms_total_median": 2559.43969999862
+    }
+  },
+  "git_sha": "e251e0c7c767e429eca0d3df9306b4bdc4def35e",
+  "git_dirty": true,
+  "timestamp_utc": "2026-09-11T19:36:09+00:00"
+}
