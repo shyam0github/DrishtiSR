@@ -36,7 +36,16 @@ const sig = (metric: string) => {
   return s;
 };
 const pct = (v: number, base: number) => (v / base) * 100;
-const fmtP = (p: number) => (p < 1e-4 ? p.toExponential(1).replace("e", "×10^") : formatNumber(p, 4));
+/** A p-value, with a real superscript for tiny ones (6.1×10⁻⁵¹, not 6.1e-51). */
+function P({ p }: { p: number }) {
+  if (p >= 1e-4) return <>{formatNumber(p, 4)}</>;
+  const [mant, exp] = p.toExponential(1).split("e");
+  return (
+    <>
+      {mant}×10<sup>{Number(exp)}</sup>
+    </>
+  );
+}
 
 export function SpectralPage() {
   return (
@@ -227,7 +236,7 @@ function Benchmark() {
           <p className="text-caption text-fg-subtle">
             opensr L1 {formatNumber(head.mean_control, 5)} → {formatNumber(head.mean_treatment, 5)}. Tile-clustered 95% CI on the mean change [
             {formatNumber(lo, 5)}, {formatNumber(hi, 5)}] ({formatNumber(pct(lo, head.mean_control), 1)}% to {formatNumber(pct(hi, head.mean_control), 1)}%
-            of A2's mean). Better on {formatNumber(head.frac_treatment_better * 100, 0)}% of pairs; Wilcoxon p {fmtP(head.p_wilcoxon_tile)} on tile means.
+            of A2's mean). Better on {formatNumber(head.frac_treatment_better * 100, 0)}% of pairs; Wilcoxon p <P p={head.p_wilcoxon_tile} /> on tile means.
           </p>
           <p className="text-caption text-warn">The price: {BENCH.cost.replace(/`/g, "")} The served model is A2.</p>
         </Card>
@@ -264,12 +273,13 @@ function Swatch({ label }: { label: string }) {
   return <span aria-hidden className="inline-block size-2.5 shrink-0 rounded-full" style={{ background: COLOR[label] }} />;
 }
 
-function MethodName({ m }: { m: Method }) {
+/** `compact` drops the Served badge for narrow chart gutters; the full name always shows. */
+function MethodName({ m, compact = false }: { m: Method; compact?: boolean }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
       <Swatch label={m.label} />
-      <span className="truncate text-fg">{m.display}</span>
-      {m.label === SERVED_LABEL && <Badge variant="ours">Served</Badge>}
+      <span className="text-fg">{m.display}</span>
+      {m.label === SERVED_LABEL && !compact && <Badge variant="ours">Served</Badge>}
     </span>
   );
 }
@@ -282,7 +292,7 @@ function ConsistencyBars() {
     <ChartCard testId="bench-bars" title="Consistency error by method" caption={`opensr-test reflectance L1, mean over ${formatNumber(BENCH.n_pairs)} pairs. Lower is more consistent.`}>
       <ul className="flex flex-col gap-4">
         {BENCH.methods.map((m) => (
-          <li key={m.label} className="grid grid-cols-[11rem_minmax(0,1fr)] items-center gap-3 text-caption" onMouseEnter={() => setHover(m.label)} onMouseLeave={() => setHover(null)}>
+          <li key={m.label} className="grid grid-cols-[13rem_minmax(0,1fr)] items-center gap-3 text-caption" onMouseEnter={() => setHover(m.label)} onMouseLeave={() => setHover(null)}>
             <MethodName m={m} />
             <div className="relative h-6">
               <div
@@ -296,7 +306,7 @@ function ConsistencyBars() {
           </li>
         ))}
       </ul>
-      <FloorAxis max={max} floor={floor} decimals={4} offset="11rem" />
+      <FloorAxis max={max} floor={floor} decimals={4} offset="13rem" />
       <p className="min-h-5 text-caption text-fg-muted" aria-live="polite">
         {hover ? hoverLine(hover) : "Hover a bar for its λ weights and role."}
       </p>
@@ -356,11 +366,11 @@ function CiChart() {
     >
       <ul className="flex flex-col gap-5">
         {rows.map(({ s, mean, tile, pair }) => (
-          <li key={s.metric} className="grid gap-2 text-caption md:grid-cols-[14rem_minmax(0,1fr)] md:items-center md:gap-3">
+          <li key={s.metric} className="grid gap-2 text-caption md:grid-cols-[18rem_minmax(0,1fr)] md:items-center md:gap-3">
             <span className="flex flex-col">
               <span className="text-fg">{SIG_LABEL[s.metric]}</span>
               <span className="num text-micro text-fg-subtle">
-                p {fmtP(s.p_wilcoxon_tile)} (tile) · {formatNumber(s.frac_treatment_better * 100, 0)}% of pairs better
+                p <P p={s.p_wilcoxon_tile} /> (tile) · {formatNumber(s.frac_treatment_better * 100, 0)}% of pairs better
               </span>
             </span>
             <div className="relative h-7" title={`${formatNumber(mean, 1)}%, tile CI [${formatNumber(tile[0]!, 1)}, ${formatNumber(tile[1]!, 1)}]%`}>
@@ -375,7 +385,7 @@ function CiChart() {
           </li>
         ))}
       </ul>
-      <div className="grid gap-3 text-micro md:grid-cols-[14rem_minmax(0,1fr)]">
+      <div className="grid gap-3 text-micro md:grid-cols-[18rem_minmax(0,1fr)]">
         <span className="hidden md:block" />
         <div className="relative h-5 border-t border-line">
           {ticks.map((t) => (
@@ -406,8 +416,8 @@ function BoxPlot({ metric, title, unit, decimals }: { metric: DistMetric; title:
           const d = m.distribution[metric];
           const c = COLOR[m.label];
           return (
-            <li key={m.label} className="grid grid-cols-[9rem_minmax(0,1fr)] items-center gap-3 text-caption" onMouseEnter={() => setHover(m.label)} onMouseLeave={() => setHover(null)}>
-              <MethodName m={m} />
+            <li key={m.label} className="grid grid-cols-[9.5rem_minmax(0,1fr)] items-center gap-3 text-caption" onMouseEnter={() => setHover(m.label)} onMouseLeave={() => setHover(null)}>
+              <MethodName m={m} compact />
               <div className="relative h-7" style={{ opacity: hover && hover !== m.label ? 0.4 : 1 }}>
                 <span className="absolute top-1/2 h-px -translate-y-1/2" style={{ left: x(d.p5), width: `calc(${x(d.p95)} - ${x(d.p5)})`, background: c }} />
                 <span
@@ -421,7 +431,7 @@ function BoxPlot({ metric, title, unit, decimals }: { metric: DistMetric; title:
           );
         })}
       </ul>
-      <FloorAxis max={max} floor={floor} decimals={decimals} offset="9rem" />
+      <FloorAxis max={max} floor={floor} decimals={decimals} offset="9.5rem" />
       <p className="num min-h-5 text-caption text-fg-muted" aria-live="polite">
         {hm
           ? `${hm.display}: median ${formatNumber(hm.distribution[metric].median, decimals + 1)}, IQR ${formatNumber(hm.distribution[metric].q1, decimals + 1)}–${formatNumber(hm.distribution[metric].q3, decimals + 1)}, mean ${formatNumber(hm.means[metric], decimals + 1)} ${unit}`

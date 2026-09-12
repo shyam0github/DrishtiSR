@@ -37,7 +37,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
-  page.on("console", (m) => m.type() === "error" && errors.push(`console.error: ${m.text()}`));
+  page.on("console", (m) => m.type() === "error" && errors.push(`console.error: ${m.text()} @ ${m.location()?.url ?? ""}`));
 
   await page.goto(`${url}/novelty/spectral`);
   await page.getByTestId("page-spectral").waitFor();
@@ -62,7 +62,7 @@ try {
     await page.getByTestId(id).waitFor();
   }
   assert.match(await page.getByTestId("bench-headline").innerText(), /-33\.3%/);
-  assert.match(await page.getByTestId("section-benchmark").innerText(), /n = 1,199 val patches · 300 tiles/);
+  assert.match(await page.getByTestId("section-benchmark").innerText(), /n = 1,199 val patches · 300 tiles/i); // eyebrow is CSS-uppercased
 
   // D: collapsed by default, opens on click.
   const details = page.getByTestId("section-how").locator("details");
