@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { toImageResult, type UpscaleResponse } from "../src/api/client";
-import { FACTS } from "../src/data/facts";
+import { parse } from "yaml";
+import { ABOUT_FACTS, FACTS } from "../src/data/facts";
 import { REPO_ROOT } from "../scripts/repo-config.mjs";
 
 const json = (rel: string) => JSON.parse(readFileSync(path.join(REPO_ROOT, rel), "utf8"));
@@ -49,6 +50,66 @@ describe("Home page facts match their reports", () => {
     expect(u.ause).toBe(FACTS.uncAuse);
     expect(u.n_samples).toBe(FACTS.uncN);
     expect(u.split).toBe("val");
+  });
+});
+
+describe("About page facts match their sources", () => {
+  const text = (rel: string) => readFileSync(path.join(REPO_ROOT, rel), "utf8");
+  const yaml = (rel: string) => parse(text(rel));
+  const A = ABOUT_FACTS;
+
+  it("training environment", () => {
+    const m = json("runs/day3/a2/run_metadata.json");
+    expect([m.cuda, m.python, m.torch, m.args.iters]).toEqual([A.trainGpu, A.trainPython, A.trainTorch, A.a2Iters]);
+    expect([m.args.n_resblocks, m.args.n_feats, m.args.batch, m.args.patch_lr]).toEqual([A.nResblocks, A.nFeats, A.batch, A.patchLr]);
+    const f = yaml("configs/frozen_day3.yaml");
+    expect(f.schedule.iters).toBe(A.scheduleIters);
+    expect(f.model.expected_parameters).toBe(FACTS.params);
+    expect(f.augment.photometric).toBe(false);
+    const req = text("requirements.txt");
+    expect(req).toContain(`omegaconf==${A.omegaconf}`);
+    expect(req).toContain(`tacoreader==${A.tacoreader}`);
+    expect(req).toContain(`opensr-test==${A.opensrTest}`);
+    expect(req).toContain(`onnxruntime==${A.onnxruntime}`);
+    expect(text("AGENTS.md")).toMatch(new RegExp(`${A.gpuHoursPerWeek} GPU-hours per\\s+week`));
+  });
+
+  it("data and splits", () => {
+    const dv = json("reports/day3_data_validity.json");
+    expect([dv.subset, dv.n_cached, dv.n_pairs]).toEqual([A.subset, A.cachedPairs, A.dvPairs]);
+    for (const [band, n] of Object.entries(A.dvMeanEqual4dp)) expect(dv.per_band[band].pairs_with_mean_equal_4dp).toBe(n);
+    expect(dv.histmatch_signature.minmax_equal_all_bands).toBe(A.dvMinMaxEqualAllBands);
+    expect(dv.r_allbands_range).toEqual([A.dvRAllBandsMin, A.dvRAllBandsMax]);
+    expect(text("PROJECT_STATE.md")).toContain(`Usable cached train = ${A.usableTrainPairs.toLocaleString("en-US")}`);
+    const gate = text("reports/day1_gate.md");
+    for (const [split, n] of Object.entries(A.splitTiles)) expect(gate).toMatch(new RegExp(`\\| ${split} \\| ${n} \\|`));
+    expect(gate).toContain(`**${FACTS.valPairs} patches**`);
+  });
+
+  it("inference environment", () => {
+    const b = json("reports/mvp/bench_a2-last-dce224ec.json");
+    expect([b.python, b.torch, b.onnxruntime, b.logical_cpus]).toEqual([A.inferPython, A.inferTorch, A.onnxruntime, A.logicalCpus]);
+    expect(b.backends.every((x: { peak_rss_bytes: unknown }) => x.peak_rss_bytes === null)).toBe(!A.peakRssMeasured);
+    expect(b.backends.find((x: { backend: string }) => x.backend === "onnx-int8").median_ms).toBe(FACTS.int8MedianMs);
+    const g = json("reports/mvp/quant_gate.json")["a2-last-dce224ec"].gate;
+    expect([g.d_psnr_db, g.d_sam_deg, g.d_lpips]).toEqual([FACTS.quantGate.dPsnrDb, FACTS.quantGate.dSamDeg, FACTS.quantGate.dLpips]);
+    expect(json("reports/mvp/unc_eval_learned_unc_c1-head_last-19c2bd0a.json").ause).toBe(FACTS.uncLearnedAuse);
+    expect(json("reports/mvp/unc_eval_tta8_a2-last-dce224ec.json").ause).toBe(FACTS.uncTta8Ause);
+  });
+
+  it("evaluation method and limitations", () => {
+    const sig = yaml("configs/base.yaml").eval_all_ckpts.significance;
+    expect([sig.n_boot, sig.ci]).toEqual([A.nBoot, A.ci]);
+    const c = json("reports/day2_runA.json").curve;
+    expect([c.best_iter, c.best_psnr, c.final_iter, c.final_psnr]).toEqual([A.runABestIter, A.runABestPsnr, A.runAFinalIter, A.runAFinalPsnr]);
+    const floor = text("reports/day3_spectral_floor.md");
+    expect(floor).toContain(`**${A.spectralFloorL1}**`);
+    expect(floor).toContain(`scores ${A.bicubicVsFloor}× the`);
+    const r = text("reports/day3_results.md");
+    expect(r).toContain(`from ${A.a2ConsistencyL1.toFixed(5)} to ${A.b1ConsistencyL1}`);
+    expect(r).toContain(`B costs ${A.b1PsnrCostDb} dB PSNR`);
+    expect(r).toContain(`LPIPS by +${A.b1LpipsCost.toFixed(4)}`);
+    expect(r).toContain("Wilcoxon p");
   });
 });
 
