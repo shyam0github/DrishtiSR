@@ -1,0 +1,507 @@
+{
+  "what": "P5 trust overlay display scales: TTA-8 uncertainty and training-operator consistency on VAL, A2 via TorchPredictor",
+  "unc_display_max": 0.003713641131762385,
+  "cons_display_max": 0.015688288547098642,
+  "spearman_tta8_unc_vs_abs_err": 0.5509238248550024,
+  "spearman_sobel_bicubic_vs_abs_err": 0.5240676687703899,
+  "spearman_tta8_unc_vs_sobel_bicubic": 0.7285848322425057,
+  "spearman_n_pixels": 200000,
+  "mean_spec_l1_sr": 0.0027809395987787866,
+  "mean_spec_l1_bicubic": 0.0012499365361691162,
+  "mean_spec_l1_hr": 0.005751501785198343,
+  "mean_hf_ratio_vs_bicubic": 1.4029367596711149,
+  "units": {
+    "unc": "reflectance (band-mean per-band std across TTA-8)",
+    "cons": "reflectance (band-mean |down4_area(SR) - LR|, training operator)",
+    "abs_err": "reflectance, band-mean |SR - HR|"
+  },
+  "n": 64,
+  "n_samples": 64,
+  "patch_pool": "300 VAL tiles x 4 grid patches (centre 128px LR tile, 64px patches)",
+  "patches": [
+    {
+      "sample_id": "NA5120_E1424N0863__m_4711053_ne_12_060_20210617",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1411N0686__m_3910961_nw_12_060_20210922",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1553N0515__m_3110003_sw_14_060_20200925",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1488N0659__m_3810442_ne_13_060_20210915",
+      "origin_lr": [
+        64,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1471N0620__m_3610536_nw_13_060_20220607",
+      "origin_lr": [
+        64,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1399N0753__m_4211058_se_12_060_20220705",
+      "origin_lr": [
+        64,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1471N0620__m_3610536_nw_13_060_20220607",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1561N0706__m_4010019_ne_14_060_20220718",
+      "origin_lr": [
+        64,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1315N0871__m_4611735_ne_11_060_20190724",
+      "origin_lr": [
+        64,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1454N0839__m_4610847_ne_12_060_20190802",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1614N0597__m_3509721_nw_14_060_20190624",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1591N0799__m_4509857_sw_14_060_20210813",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1263N0848__m_4412013_sw_10_060_20200622",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1488N0785__m_4410560_ne_13_060_20220628",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1263N0848__m_4412013_sw_10_060_20200622",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1315N0871__m_4611735_ne_11_060_20190724",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1391N0801__m_4411150_se_12_060_20210618",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1342N0544__m_3211256_se_12_060_20190616",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1554N0552__m_3310027_nw_14_060_20220905",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1570N0493__m_3009902_se_14_060_20200929",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1326N0606__m_3411313_sw_12_060_20211204",
+      "origin_lr": [
+        64,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1195N0710__m_3712109_nw_10_060_20200525",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1410N0799__m_4411052_nw_12_060_20190720",
+      "origin_lr": [
+        64,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1328N0656__m_3711357_ne_12_060_20211002",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1574N0725__m_4109925_ne_14_060_20220718",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1612N0478__m_3009752_nw_14_060_20201030",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1466N0717__m_4010613_nw_13_060_20190924",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1575N0676__m_3909942_ne_14_060_20190711",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1271N0595__m_3311614_se_11_060_20220415",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1606N0763__m_4309733_sw_14_060_20220731",
+      "origin_lr": [
+        64,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1564N0545__m_3310047_sw_14_060_20220903",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1441N0593__m_3510764_nw_13_060_20200517",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1561N0488__m_3010022_se_14_060_20220611",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1192N0706__m_3712224_sw_10_060_20200525",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1518N0775__m_4310312_sw_13_060_20210918",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1609N0651__m_3809750_ne_14_060_20210703",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1486N0546__m_3310461_ne_13_060_20220530",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1600N0578__m_3409814_ne_14_060_20190629",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1609N0521__m_3209750_ne_14_060_20201001",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1510N0573__m_3410339_nw_13_060_20200521",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1556N0850__m_4710145_ne_14_060_20220809",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1523N0649__m_3710203_nw_13_060_20210708",
+      "origin_lr": [
+        64,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1338N0630__m_3511308_ne_12_060_20211019",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1310N0816__m_4311708_ne_11_030_20220710",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1313N0729__m_4011552_sw_11_060_20220707",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1631N0537__m_3209604_nw_14_060_20220704",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1315N0871__m_4611735_ne_11_060_20190724",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1510N0573__m_3410339_nw_13_060_20200521",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1528N0815__m_4510323_se_13_060_20210830",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1583N0666__m_3809906_se_14_060_20190711",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1588N0417__m_2709834_se_14_060_20201031",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1486N0777__m_4310520_nw_13_060_20220628",
+      "origin_lr": [
+        64,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1208N0713__m_3812154_sw_10_060_20200617",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1523N0649__m_3710203_nw_13_060_20210708",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1615N0490__m_3009713_se_14_060_20220611",
+      "origin_lr": [
+        64,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1586N0802__m_4509954_se_14_060_20210813",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1598N0702__m_4009829_nw_14_060_20200710",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1568N0757__m_4310062_nw_14_060_20220829",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1366N0901__m_4811434_se_11_060_20211018",
+      "origin_lr": [
+        0,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1405N0712__m_4011056_ne_12_060_20211105",
+      "origin_lr": [
+        64,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1554N0552__m_3310027_nw_14_060_20220905",
+      "origin_lr": [
+        0,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1397N0862__m_4611207_ne_12_060_20210628",
+      "origin_lr": [
+        64,
+        64
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1516N0490__m_3010220_sw_13_060_20201016",
+      "origin_lr": [
+        64,
+        0
+      ]
+    },
+    {
+      "sample_id": "NA5120_E1212N0723__m_3812122_se_10_060_20200617",
+      "origin_lr": [
+        64,
+        64
+      ]
+    }
+  ],
+  "calibration_seconds": 50.694625899999664,
+  "timing_ms_per_image": {
+    "lr_size": [
+      128,
+      128
+    ],
+    "backend": "torch-fp32",
+    "threads": 6,
+    "repeats": 3,
+    "statistic": "median",
+    "cpu_load_percent_before": 13.0,
+    "provisional": false,
+    "tta0": {
+      "sr": 316.7691999988165,
+      "uncertainty": null,
+      "total": 366.96219999794266
+    },
+    "tta4": {
+      "sr": 315.43799999781186,
+      "uncertainty": 956.17829999901,
+      "total": 1332.6711999980034
+    },
+    "tta8": {
+      "sr": 279.6195999981137,
+      "uncertainty": 2112.697799999296,
+      "total": 2484.893500000908
+    }
+  },
+  "checkpoint_id": "a2-last-dce224ec",
+  "checkpoint_path": "D:\\SIH\\DrishtiSR\\runs\\day3\\a2\\last.pt",
+  "git_sha": "69d6e5f25cfd3466bc5f3240fae583451016d6d5",
+  "git_dirty": true,
+  "split": "val",
+  "seed": 26142,
+  "interim": false,
+  "timestamp_utc": "2026-09-11T18:41:17+00:00"
+}

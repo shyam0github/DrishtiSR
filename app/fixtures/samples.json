@@ -1,0 +1,18 @@
+{
+  "samples": [
+    {
+      "id": "NA5120_E1186N0721__m_3812251_ne_10_060_20200602",
+      "label": "SEN2NAIPv2 VAL patch (with 2.5 m reference)",
+      "thumb_url": "/fixtures/lr_rgb.png",
+      "has_gt": true,
+      "lr_size": [64, 64]
+    },
+    {
+      "id": "delhi_A",
+      "label": "Central Delhi, Sentinel-2 L2A 2024-10-30 (no reference)",
+      "thumb_url": "/fixtures/lr_rgb.png",
+      "has_gt": false,
+      "lr_size": [512, 512]
+    }
+  ]
+}

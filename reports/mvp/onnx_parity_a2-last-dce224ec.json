@@ -1,0 +1,159 @@
+{
+  "what": "P4 ONNX FP32 parity",
+  "checkpoint_id": "a2-last-dce224ec",
+  "split": "train+val",
+  "n_samples": 10,
+  "interim": false,
+  "export": {
+    "checkpoint_id": "a2-last-dce224ec",
+    "checkpoint_path": "D:\\SIH\\DrishtiSR\\runs\\day3\\a2\\last.pt",
+    "checkpoint_sha256": "dce224ec1ad32e664d7d9c8b1b007318e4fef71cda35c811c47fb24b5fc710eb",
+    "iteration": 12000,
+    "arch": {
+      "scale": 4,
+      "n_resblocks": 16,
+      "n_feats": 48,
+      "in_ch": 4
+    },
+    "params": 855652,
+    "onnx_initializer_elements": 855652,
+    "has_scale_head": false,
+    "opset": 17,
+    "input": {
+      "name": "lr",
+      "shape": [
+        "N",
+        4,
+        "h",
+        "w"
+      ],
+      "units": "surface reflectance, unclipped"
+    },
+    "output": {
+      "name": "sr",
+      "shape": [
+        "N",
+        4,
+        "H",
+        "W"
+      ],
+      "channels": "0-3 SR mean"
+    },
+    "dynamic_axes": {
+      "lr": {
+        "0": "N",
+        "2": "h",
+        "3": "w"
+      },
+      "sr": {
+        "0": "N",
+        "2": "H",
+        "3": "W"
+      }
+    },
+    "tile_geometry": "dynamic batch, H and W (predictor feeds single tiles of max(h, w) for small inputs)",
+    "trace_shape": [
+      1,
+      4,
+      64,
+      64
+    ],
+    "constant_folding": true,
+    "simplifier": "onnxsim not installed; skipped",
+    "file": "model_fp32.onnx",
+    "bytes": 3441761,
+    "sha256": "82e3d84485c6c038b7d6e2aa37cffae9afb0c7f0c87317045bc43336beb3787d",
+    "torch": "2.5.1+cpu",
+    "onnx": "1.17.0",
+    "git_sha": "90e0efa6122168c9cf27d8b0156cd0bdf834276f",
+    "timestamp_utc": "2026-09-11T18:44:18+00:00"
+  },
+  "raw_graph": {
+    "split": "train",
+    "n_samples": 8,
+    "sample_ids": [
+      "NA5120_E1269N0570__m_3211632_nw_11_060_20200420",
+      "NA5120_E1194N0700__m_3712133_se_10_060_20200525",
+      "NA5120_E1544N0582__m_3410106_nw_14_060_20200923",
+      "NA5120_E1594N0540__m_3309860_nw_14_060_20200925",
+      "NA5120_E1576N0622__m_3609911_ne_14_060_20190627",
+      "NA5120_E1391N0751__m_4111107_sw_12_060_20210904",
+      "NA5120_E1652N0711__m_4009507_nw_15_060_20210916",
+      "NA5120_E1553N0868__m_4810151_sw_14_060_20211003"
+    ],
+    "tile_lr": 64,
+    "max_abs_diff": 4.470348358154297e-07,
+    "per_tile": [
+      4.470348358154297e-07,
+      3.8743019104003906e-07,
+      3.5762786865234375e-07,
+      3.8743019104003906e-07,
+      3.8743019104003906e-07,
+      3.8743019104003906e-07,
+      4.470348358154297e-07,
+      4.470348358154297e-07
+    ],
+    "tolerance": 0.0001,
+    "passed": true
+  },
+  "tiled": {
+    "split": "val",
+    "n_samples": 2,
+    "rows": [
+      {
+        "sample_id": "NA5120_E1186N0721__m_3812251_ne_10_060_20200602",
+        "tiling": "default tiling (cfg.frontend.tile)",
+        "lr_shape": [
+          1,
+          4,
+          130,
+          130
+        ],
+        "psnr_torch_vs_onnx_db": 145.20476495273175,
+        "max_abs_diff": 4.76837158203125e-07
+      },
+      {
+        "sample_id": "NA5120_E1192N0706__m_3712224_sw_10_060_20200525",
+        "tiling": "default tiling (cfg.frontend.tile)",
+        "lr_shape": [
+          1,
+          4,
+          130,
+          130
+        ],
+        "psnr_torch_vs_onnx_db": 144.54074209172109,
+        "max_abs_diff": 9.5367431640625e-07
+      },
+      {
+        "sample_id": "NA5120_E1186N0721__m_3812251_ne_10_060_20200602",
+        "tiling": "forced tiling tile=64 overlap=16",
+        "lr_shape": [
+          1,
+          4,
+          130,
+          130
+        ],
+        "psnr_torch_vs_onnx_db": 146.67900248541736,
+        "max_abs_diff": 5.066394805908203e-07
+      },
+      {
+        "sample_id": "NA5120_E1192N0706__m_3712224_sw_10_060_20200525",
+        "tiling": "forced tiling tile=64 overlap=16",
+        "lr_shape": [
+          1,
+          4,
+          130,
+          130
+        ],
+        "psnr_torch_vs_onnx_db": 146.00623592097764,
+        "max_abs_diff": 1.0728836059570312e-06
+      }
+    ],
+    "min_psnr_db": 144.54074209172109,
+    "threshold_db": 60.0,
+    "passed": true
+  },
+  "passed": true,
+  "git_sha": "90e0efa6122168c9cf27d8b0156cd0bdf834276f",
+  "timestamp_utc": "2026-09-11T18:44:33+00:00"
+}

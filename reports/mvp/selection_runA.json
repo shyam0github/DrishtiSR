@@ -1,0 +1,76 @@
+{
+  "what": "P7 within-run checkpoint selection (pre-registered Day 3 rule, wrapped)",
+  "run": "runA",
+  "rule": "day3-preregistered",
+  "rule_params": {
+    "metric": "reflectance",
+    "metric_better": "lower",
+    "tie_metric": "lpips",
+    "tie_better": "lower",
+    "tie_definition": "paired bootstrap 95% CI on (candidate - minimum) of reflectance contains 0 (pair-level, 10000 replicates)",
+    "n_boot": 10000,
+    "ci": 0.95,
+    "seed": 42,
+    "config_block": "configs/base.yaml eval_all_ckpts.selection",
+    "implementation": "src.eval.ckpt_selection.select_checkpoint",
+    "provenance": "The rule (consistency first, LPIPS as tie-break) was set by the task before any results. Its two operational choices -- opensr-test `reflectance` as the consistency metric, and a CI-based tie -- were written into configs/base.yaml before any full-split evaluation ran. The training-loop validation logs (a 400-patch AMP subsample, not the selection data) had been read at that point."
+  },
+  "superseded": "sel-v1 (0.85 HF/Sobel vs GT guard, 0.002 LPIPS band) not applied: RULES.md Day 3 addendum",
+  "source": "D:\\SIH\\DrishtiSR\\outputs\\metrics\\eval_all_ckpts\\runA",
+  "split": "val",
+  "n_pairs": 1199,
+  "minimum": "it08000",
+  "tied_set": [
+    "it08000"
+  ],
+  "candidates": [
+    {
+      "label": "it08000",
+      "mean_reflectance": 0.0034282493271636876,
+      "mean_lpips": 0.32191763429423237,
+      "delta_vs_min": 0.0,
+      "ci_vs_min": [
+        0.0,
+        0.0
+      ],
+      "tied_with_min": true,
+      "is_min": true,
+      "selected": true,
+      "iteration": 8000,
+      "path": "D:\\SIH\\DrishtiSR\\runs\\runA\\best.pt",
+      "n_pairs": 1199
+    },
+    {
+      "label": "it40000",
+      "mean_reflectance": 0.003572745653167565,
+      "mean_lpips": 0.30393679645704763,
+      "delta_vs_min": 0.00014449632600387774,
+      "ci_vs_min": [
+        0.00011968376083093391,
+        0.00017049438363064026
+      ],
+      "tied_with_min": false,
+      "is_min": false,
+      "selected": false,
+      "iteration": 40000,
+      "path": "D:\\SIH\\DrishtiSR\\runs\\runA\\last.pt",
+      "n_pairs": 1199
+    }
+  ],
+  "chosen": {
+    "label": "it08000",
+    "iteration": 8000,
+    "path": "D:\\SIH\\DrishtiSR\\runs\\runA\\best.pt"
+  },
+  "best_pt": {
+    "path": "D:\\SIH\\DrishtiSR\\runs\\runA\\best.pt",
+    "iteration": 8000,
+    "selected_by": "training loop, val PSNR on 25-batch AMP subsample",
+    "coincides": true
+  },
+  "unmapped_iterations": [],
+  "git_sha": "e251e0c7c767e429eca0d3df9306b4bdc4def35e",
+  "git_dirty": true,
+  "interim": true,
+  "timestamp_utc": "2026-09-11T19:33:55+00:00"
+}

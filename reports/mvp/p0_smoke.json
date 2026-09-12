@@ -1,0 +1,33 @@
+{
+  "what": "P0 predictor smoke: one VAL patch through A2 via TorchPredictor",
+  "checkpoint_id": "a2-last-dce224ec",
+  "checkpoint_path": "D:\\SIH\\DrishtiSR\\runs\\day3\\a2\\last.pt",
+  "git_sha": "4d208b19e78c56205d46e226b693d97c8ed4d588",
+  "git_dirty": true,
+  "split": "val",
+  "n_samples": 1,
+  "sample_id": "NA5120_E1186N0721__m_3812251_ne_10_060_20200602",
+  "lr_shape": [
+    1,
+    4,
+    64,
+    64
+  ],
+  "crop": "centre_crop_pair lr_size=64",
+  "psnr_sr_db": 38.32723074952215,
+  "psnr_bicubic_db": 38.24936016854886,
+  "psnr_data_range": 1.0,
+  "bicubic_antialias": true,
+  "max_abs_diff_vs_direct_forward": 0.0,
+  "model": {
+    "backend": "torch-fp32",
+    "checkpoint_id": "a2-last-dce224ec",
+    "params": 855652,
+    "model_bytes": 3422608,
+    "threads": 6,
+    "interim": false,
+    "has_scale_head": false
+  },
+  "interim": false,
+  "timestamp_utc": "2026-09-12T09:37:18+00:00"
+}

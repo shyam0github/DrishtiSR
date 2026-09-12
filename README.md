@@ -285,3 +285,44 @@ Stated plainly (see [reports/day3_results.md](reports/day3_results.md)):
 
 **Next:** Run C (heteroscedastic head), then ONNX export and INT8 CPU
 benchmarking of both output rasters.
+
+<!-- MVP-DEMO:START -->
+## MVP demo (one command, CPU only)
+
+```powershell
+cd D:\SIH\DrishtiSR-mvp
+$env:PYTHONPATH = "D:\SIH\DrishtiSR-mvp"
+D:\SIH\DrishtiSR\.venv\Scripts\python.exe scripts/serve.py
+```
+
+This loads the selected A2 checkpoint (`a2-last-dce224ec`, 855,652 parameters)
+and picks the first free port from 8000. It opens the browser and prints the
+backend, the checkpoint_id and the interim flag. `DRISHTI_THREADS` (default 6)
+sets the thread count; `--no-browser` suppresses the browser. ONNX FP32 is
+served because INT8 failed its quality gate.
+
+**What the demo shows: three novelties, and where each appears in the UI**
+
+| Novelty | UI element |
+|---|---|
+| Reference-free spectral consistency: each result is re-degraded with the training operator and compared with the 10 m input | "Spectral consistency" overlay (fixed viridis scale) and the consistency card, with bicubic and HR-floor markers, plus the blur-guard banner when the HF ratio vs bicubic < 1.05 |
+| Per-pixel uncertainty (TTA-4/8 by default; learned Laplace head opt-in via `DRISHTI_UNC_CKPT`) | "Uncertainty" overlay with a fixed-scale legend, and the uncertainty GeoTIFF download |
+| ≤ 1 M parameters, CPU-only, ONNX | Header model badge (backend · params · size · threads) and the runtime row in the metrics |
+
+The page also shows an LR/bicubic/HR vs SR swipe slider, RGB and false-colour
+views, sample tiles (TEST, display only) and two Delhi Sentinel-2 crops that
+have no ground truth, so they show trust maps only. It accepts 4-band GeoTIFF
+upload and offers the SR output as a georeferenced 2.5 m GeoTIFF download.
+
+**Data.** Real Sentinel-2 L2A 10 m inputs (B04, B03, B02, B08) paired with 2.5 m NAIP targets that the SEN2NAIPv2 authors co-registered and radiometrically harmonised to Sentinel-2 (crosssensor subset). Inputs are not synthetically degraded; matching per-band statistics between inputs and targets are expected from this harmonisation.
+
+**Honest note.** The training-time spectral loss was tested and rejected
+(`reports/day3_ab_metrics.csv`: B1 LPIPS +3.9 % vs A2, blur index 0.847 < 0.90).
+Consistency is measured at inference instead. The consistency projection would
+have been applied only if its gate passed; it failed
+(`reports/mvp/projection_gate.json`), so it is not applied.
+
+Tests: `python -m pytest tests/mvp` (`tests/mvp/test_e2e.py` starts the real
+server). Handoff notes: `docs/mvp/HANDOFF.md`; demo click path:
+`docs/mvp/demo_script.md`.
+<!-- MVP-DEMO:END -->

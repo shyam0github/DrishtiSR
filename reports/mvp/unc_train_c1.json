@@ -1,0 +1,76 @@
+{
+  "what": "P6 learned Laplace scale head training run",
+  "run": "c1",
+  "status": "completed",
+  "iters_requested": 2000,
+  "iters_completed": 2000,
+  "loss_first": -2.8767380714416504,
+  "loss_last": -3.2544054985046387,
+  "all_losses_finite": true,
+  "sec_per_iter_mean": 2.228363832600149,
+  "elapsed_min": 74.50435771500003,
+  "watch_verdict": "passed",
+  "watch_history": [
+    {
+      "iter": 250,
+      "rho": 0.2128100902736209,
+      "frac_floor": 0.0,
+      "spatial_cv": 0.18157728043509158
+    },
+    {
+      "iter": 500,
+      "rho": 0.2625233450897292,
+      "frac_floor": 0.0,
+      "spatial_cv": 0.2831051223649126
+    },
+    {
+      "iter": 750,
+      "rho": 0.2914101192590527,
+      "frac_floor": 0.0,
+      "spatial_cv": 0.3569366821610601
+    },
+    {
+      "iter": 1000,
+      "rho": 0.31790647465523586,
+      "frac_floor": 0.0,
+      "spatial_cv": 0.4056262145681777
+    },
+    {
+      "iter": 1250,
+      "rho": 0.33918018220017115,
+      "frac_floor": 0.0,
+      "spatial_cv": 0.4377049537438529
+    },
+    {
+      "iter": 1500,
+      "rho": 0.35787343329851906,
+      "frac_floor": 0.0,
+      "spatial_cv": 0.4376346253325482
+    },
+    {
+      "iter": 1750,
+      "rho": 0.3627961076595134,
+      "frac_floor": 0.0,
+      "spatial_cv": 0.45781658528774904
+    },
+    {
+      "iter": 2000,
+      "rho": 0.36708549170183236,
+      "frac_floor": 0.0,
+      "spatial_cv": 0.45941893514842774
+    }
+  ],
+  "recommendation": null,
+  "mean_path_bit_identical": true,
+  "b0": 0.008958065649494529,
+  "checkpoint_id": "unc_c1-head_last-19c2bd0a",
+  "checkpoint_path": "D:\\SIH\\DrishtiSR-mvp\\runs\\mvp\\unc_c1\\head_last.pt",
+  "backbone_checkpoint_id": "a2-last-dce224ec",
+  "config_hash": "b292a865e30c7eea0825cbcea94d676cd3e5713ec995db9170454252249b0216",
+  "git_sha": "941a50915323b07965e864a07fb2c7a159c40b44",
+  "git_dirty": true,
+  "interim": false,
+  "split": "train",
+  "n_samples": 32000,
+  "timestamp_utc": "2026-09-12T03:10:51+00:00"
+}

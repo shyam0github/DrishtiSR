@@ -1,0 +1,26 @@
+{
+  "what": "P6 head-training CPU speed at the config batch size (5 timed iters after 1 warm-up)",
+  "sec_per_iter": 1.8842154399993887,
+  "iter_seconds": [
+    1.6314568999987387,
+    1.9740702000017336,
+    1.6245960999985982,
+    1.6328618999978062,
+    2.558092100000067
+  ],
+  "batch": 16,
+  "threads": 6,
+  "watch_check_seconds": 1.51902759999939,
+  "n_watch_checks": 8,
+  "projected_minutes_2000_iters": 63.00971834664621,
+  "budget_minutes": 75.0,
+  "needs_kaggle": false,
+  "cpu_load_percent_after": 6.0,
+  "provisional": true,
+  "checkpoint_id": "a2-last-dce224ec",
+  "git_sha": "e251e0c7c767e429eca0d3df9306b4bdc4def35e",
+  "config_hash": "b292a865e30c7eea0825cbcea94d676cd3e5713ec995db9170454252249b0216",
+  "split": "train",
+  "n_samples": 80,
+  "timestamp_utc": "2026-09-11T19:36:54+00:00"
+}

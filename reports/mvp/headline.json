@@ -1,0 +1,66 @@
+{
+  "winner": "A2",
+  "winner_checkpoint_id": "a2-last-dce224ec",
+  "lpips": {
+    "winner": 0.332209,
+    "bicubic": 0.403318,
+    "relative_change_vs_bicubic": -0.17631000847966127,
+    "provenance": {
+      "source": "D:\\SIH\\DrishtiSR-mvp\\reports\\day3_ab_metrics.csv",
+      "checkpoint_id": "a2-last-dce224ec",
+      "split": "val",
+      "n_samples": 1199,
+      "interim": false,
+      "run_commit": "fb8659d"
+    }
+  },
+  "spectral_consistency_opensr": {
+    "measure": "opensr-test reflectance L1 (LR vs SR degraded to 10 m), surface reflectance",
+    "winner": 0.00319858,
+    "bicubic": 0.00217046,
+    "hr_reference": 0.004782443621845941,
+    "winner_vs_bicubic_ratio": 1.4736876053924053,
+    "winner_vs_hr_reference_ratio": 0.6688170845107428,
+    "provenance": {
+      "source": "D:\\SIH\\DrishtiSR-mvp\\reports\\day3_ab_metrics.csv",
+      "checkpoint_id": "a2-last-dce224ec",
+      "split": "val",
+      "n_samples": 1199,
+      "interim": false,
+      "run_commit": "fb8659d",
+      "hr_reference_source": "D:\\SIH\\DrishtiSR-mvp\\reports\\day3_results.json floor.reflectance (HR in place of SR)"
+    }
+  },
+  "a2_plus_projection": {
+    "included": false,
+    "reason": "projection gate not passed"
+  },
+  "int8": {
+    "bytes": 981131,
+    "median_ms": 781.9019500002469,
+    "p90_ms": 815.1871399993979,
+    "gate_passed": false,
+    "served": false,
+    "served_backend": "onnx-fp32",
+    "fp32_bytes": 3441761,
+    "fp32_median_ms": 1220.0843999999051,
+    "provenance": {
+      "source": "D:\\SIH\\DrishtiSR-mvp\\reports\\mvp\\bench_a2-last-dce224ec.json",
+      "quant_gate": "D:\\SIH\\DrishtiSR-mvp\\reports\\mvp\\quant_gate.json",
+      "checkpoint_id": "a2-last-dce224ec",
+      "split": null,
+      "input": "data/delhi/delhi_A_20241030.tif window rows/cols (400, 400) 256x256, (dn-1000)/10000",
+      "threads": 6,
+      "provisional": false,
+      "interim": false
+    }
+  },
+  "git_sha": "4d208b19e78c56205d46e226b693d97c8ed4d588",
+  "git_dirty": true,
+  "timestamp_utc": "2026-09-12T09:35:33+00:00",
+  "split": "val",
+  "test_guard": {
+    "split": "val",
+    "action": "none"
+  }
+}
