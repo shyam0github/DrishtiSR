@@ -12,6 +12,8 @@ Environment:
     DRISHTI_BACKEND   auto | onnx-int8 | onnx-fp32 | torch   (default auto)
     DRISHTI_THREADS   CPU threads (default 6)
     DRISHTI_PROJECT   "0" disables the consistency projection even if its gate passed
+    DRISHTI_UNC_CKPT  opt-in P6 head checkpoint (runs/mvp/unc_c1/head_last.pt): serves
+                      EDSRWithScale.forward_packed via tiled.py, uncertainty = learned_laplace
 """
 
 from __future__ import annotations
@@ -101,6 +103,16 @@ class Engine:
     # -------------------------------------------------------------- startup
     def _load_predictor(self, requested: str):
         kw = dict(threads=self.threads, interim=self.interim)
+        unc_ckpt = os.environ.get("DRISHTI_UNC_CKPT", "").strip()
+        if unc_ckpt:  # opt-in learned Laplace head (P6); torch only, TTA setting is then ignored
+            from src.uncertainty.head import ScalePredictor
+            self._backend_reason = f"DRISHTI_UNC_CKPT={unc_ckpt} -> torch-fp32 + learned scale head"
+            if requested not in ("auto", "torch"):
+                self.startup_warnings.append(
+                    f"DRISHTI_BACKEND={requested} ignored: the learned scale head runs on torch-fp32.")
+            predictor = ScalePredictor(unc_ckpt, **kw)
+            self.checkpoint_id = str(predictor.info["checkpoint_id"])
+            return predictor
         if requested == "torch":
             self._backend_reason = "DRISHTI_BACKEND=torch"
             return TorchPredictor(self.ckpt, **kw)
