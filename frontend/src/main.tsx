@@ -4,6 +4,7 @@ import { createBrowserRouter, RouterProvider } from "react-router";
 import "./index.css";
 import { AppShell } from "./layout/AppShell";
 import { AboutPage } from "./pages/AboutPage";
+import { EfficiencyPage } from "./pages/EfficiencyPage";
 import { HomePage } from "./pages/HomePage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { SpectralPage } from "./pages/SpectralPage";
@@ -18,6 +19,7 @@ const DesignSystemPage = lazy(() => import("./pages/DesignSystemPage"));
 const PAGES: Record<string, ReactNode> = {
   "/": <HomePage />,
   "/novelty/spectral": <SpectralPage />,
+  "/novelty/efficiency": <EfficiencyPage />,
   "/about": <AboutPage />,
 };
 

@@ -22,9 +22,24 @@ export const FACTS = {
   int8GatePassed: false,
   /** Attempt C, the INT8 graph closest to the gate: timed for information, not served. */
   int8MedianMs: 781.9019500002469,
+  /** onnx-fp32 vs torch-fp32, max abs difference in reflectance (deploy_table.md notes). */
+  onnxParityMaxAbsDiff: "4.5e-07",
+
+  /** Same benchmark at 1 intra-op thread (bench_*_t1.json, 2026-09-12, load 16% so not provisional). */
+  t1OnnxFp32MedianMs: 2369.0246999994997,
+  t1Int8MedianMs: 1603.7512499988225,
+  t1Provisional: false,
 
   /** INT8 accuracy gate: degradations INT8 vs FP32 (positive = INT8 worse), must all be <= the limit. */
   quantGate: { dPsnrDb: 0.1, dSamDeg: 0.05, dLpips: 0.005 },
+  quantGateN: 64,
+  quantCalibN: 128,
+  quantAttempts: [
+    { attempt: "A", calibration: "MinMax", keptFp32: null, bytes: 973_708, dPsnrDb: 0.5922442764232443, dSamDeg: 0.32278018122080265, dLpips: -0.026800789521075785 },
+    { attempt: "B", calibration: "Percentile 99.99", keptFp32: null, bytes: 973_732, dPsnrDb: 0.4804290597400893, dSamDeg: 0.15911356462980164, dLpips: -0.007758345629554242 },
+    { attempt: "C", calibration: "Percentile 99.99", keptFp32: "first and output conv", bytes: 981_131, dPsnrDb: 0.32906808175675906, dSamDeg: 0.06616762393422126, dLpips: -0.005414303625002503 },
+    { attempt: "D", calibration: "Percentile 99.99", keptFp32: "upsampler", bytes: 1_463_325, dPsnrDb: 0.43885113724944347, dSamDeg: 0.1505136693505289, dLpips: -0.006967683613765985 },
+  ],
 
   /** Validation split, 1,199 pairs, served checkpoint vs bicubic. */
   valPairs: 1199,
@@ -108,6 +123,7 @@ export const FACT_SOURCES = {
   params: "reports/mvp/deploy_table.md",
   runAParams: "src/api/fixtures/metrics.json (snapshot of reports/day3_results.json)",
   bench: "reports/mvp/bench_a2-last-dce224ec.json",
+  bench1t: "reports/mvp/bench_a2-last-dce224ec_t1.json",
   int8: "reports/mvp/quant_gate.json",
   headline: "reports/mvp/headline.json",
   uncertainty: "reports/mvp/unc_eval_tta4_a2-last-dce224ec.json",

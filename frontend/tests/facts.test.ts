@@ -32,6 +32,36 @@ describe("Home page facts match their reports", () => {
     expect(bench.backends.find((b: { backend: string }) => b.backend === "onnx-int8").model_bytes).toBe(FACTS.int8Bytes);
   });
 
+  it("efficiency page: INT8 timing, 1-thread benchmark, parity", () => {
+    const bench = json("reports/mvp/bench_a2-last-dce224ec.json");
+    expect(bench.backends.find((b: { backend: string }) => b.backend === "onnx-int8").median_ms).toBe(FACTS.int8MedianMs);
+    const t1 = json("reports/mvp/bench_a2-last-dce224ec_t1.json");
+    expect(t1.threads).toBe(1);
+    expect(t1.runs).toBe(FACTS.benchRuns);
+    expect(t1.cpu_model).toBe(FACTS.benchCpu);
+    expect(t1.input).toBe(bench.input);
+    expect(t1.provisional).toBe(FACTS.t1Provisional);
+    const med = (b: string) => t1.backends.find((r: { backend: string }) => r.backend === b).median_ms;
+    expect(med("onnx-fp32")).toBe(FACTS.t1OnnxFp32MedianMs);
+    expect(med("onnx-int8")).toBe(FACTS.t1Int8MedianMs);
+    const table = readFileSync(path.join(REPO_ROOT, "reports/mvp/deploy_table.md"), "utf8");
+    expect(table).toContain(`parity max abs diff ${FACTS.onnxParityMaxAbsDiff}`);
+  });
+
+  it("efficiency page: every INT8 quantisation attempt", () => {
+    const gate = json("reports/mvp/quant_gate.json")["a2-last-dce224ec"];
+    expect(gate.gate).toEqual({ d_psnr_db: FACTS.quantGate.dPsnrDb, d_sam_deg: FACTS.quantGate.dSamDeg, d_lpips: FACTS.quantGate.dLpips });
+    expect(gate.n_samples).toBe(FACTS.quantGateN);
+    expect(gate.calibration.n).toBe(FACTS.quantCalibN);
+    expect(gate.attempts.map((a: { attempt: string }) => a.attempt)).toEqual(FACTS.quantAttempts.map((a) => a.attempt));
+    for (const [i, a] of gate.attempts.entries()) {
+      const f = FACTS.quantAttempts[i];
+      expect([a.bytes, a.d_psnr_db, a.d_sam_deg, a.d_lpips, a.passed]).toEqual([f.bytes, f.dPsnrDb, f.dSamDeg, f.dLpips, false]);
+      expect(a.calibration).toBe(f.calibration.split(" ")[0]);
+      expect(a.exclusion === null).toBe(f.keptFp32 === null);
+    }
+  });
+
   it("headline quality and consistency", () => {
     const h = json("reports/mvp/headline.json");
     expect(h.lpips.winner).toBe(FACTS.lpipsServed);

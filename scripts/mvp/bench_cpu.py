@@ -36,6 +36,7 @@ from src.utils.gitmeta import git_metadata
 from src.utils.paths import repo_root
 
 SIZE, WARMUP, RUNS = 256, 3, 20
+DEPLOY_THREADS = 6  # AGENTS.md §1 deployment target
 DELHI = Path("data") / "delhi" / "delhi_A_20241030.tif"
 DN_OFFSET, REFLECT_DIV = 1000.0, 10000.0  # configs/base.yaml delhi.dn_offset, reflectance_scale
 WINDOW_ORIGIN = (400, 400)  # row, col of the 256x256 window inside the 1243x1294 scene
@@ -99,7 +100,7 @@ def time_backend(pred: Any, dn: np.ndarray) -> Dict[str, Any]:
             "peak_rss_bytes": _peak_rss(), "_out": out}
 
 
-def run(checkpoint: Path, interim: bool = False, threads: int = 6) -> Dict[str, Any]:
+def run(checkpoint: Path, interim: bool = False, threads: int = DEPLOY_THREADS) -> Dict[str, Any]:
     state = cpu_state()
     torch.set_num_threads(threads)
     dn = delhi_window()
@@ -143,7 +144,9 @@ def run(checkpoint: Path, interim: bool = False, threads: int = 6) -> Dict[str, 
         "backends": rows,
         "timestamp_utc": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
     }
-    write_json(repo_root() / "reports" / "mvp" / f"bench_{cid}.json", report)
+    # The deployment thread count keeps the canonical name; other counts get a suffix so they never overwrite it.
+    suffix = "" if threads == DEPLOY_THREADS else f"_t{threads}"
+    write_json(repo_root() / "reports" / "mvp" / f"bench_{cid}{suffix}.json", report)
     return report
 
 
@@ -151,8 +154,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--checkpoint", required=True, type=Path)
     ap.add_argument("--interim", action="store_true")
+    ap.add_argument("--threads", type=int, default=DEPLOY_THREADS,
+                    help=f"intra-op threads (default {DEPLOY_THREADS}, the deployment target; others write bench_<id>_t<N>.json)")
     a = ap.parse_args()
-    rep = run(a.checkpoint, a.interim)
+    rep = run(a.checkpoint, a.interim, a.threads)
     for r in rep["backends"]:
         print(f"{r['backend']:>11}: median {r['median_ms']:.1f} ms  p90 {r['p90_ms']:.1f} ms")
     print(f"load before {rep['load_percent_before']}% provisional={rep['provisional']}")
