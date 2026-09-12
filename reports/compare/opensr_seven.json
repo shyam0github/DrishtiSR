@@ -1,0 +1,93 @@
+{
+  "written_utc": "2026-09-12T13:33:15+00:00",
+  "smoke": false,
+  "source_report": "reports/day3_results.json",
+  "source_cache": "outputs/metrics/eval_all_ckpts",
+  "split": "val",
+  "metrics": [
+    "reflectance",
+    "spectral",
+    "spatial",
+    "synthesis",
+    "ha_metric",
+    "om_metric",
+    "im_metric"
+  ],
+  "rows": [
+    {
+      "label": "bicubic",
+      "checkpoint": "bicubic",
+      "n_pairs": 1199,
+      "n_nonfinite": {
+        "reflectance": 0,
+        "spectral": 0,
+        "spatial": 0,
+        "synthesis": 0,
+        "ha_metric": 0,
+        "om_metric": 0,
+        "im_metric": 0
+      },
+      "weights_sha256": null,
+      "fingerprint": "92ee4b4d79244e8fa544994f5d9e6b7ba65c51535559c74a3e21626614d4b122",
+      "means": {
+        "reflectance": 0.0021704580961115195,
+        "spectral": 0.5151552355120439,
+        "spatial": 0.006195968478371225,
+        "synthesis": 0.0026408804489689106,
+        "ha_metric": 0.08084506550811543,
+        "om_metric": 0.8619920872866461,
+        "im_metric": 0.057162848507070416
+      }
+    },
+    {
+      "label": "runA",
+      "checkpoint": "it08000",
+      "n_pairs": 1199,
+      "n_nonfinite": {
+        "reflectance": 0,
+        "spectral": 0,
+        "spatial": 0,
+        "synthesis": 0,
+        "ha_metric": 0,
+        "om_metric": 0,
+        "im_metric": 0
+      },
+      "weights_sha256": "cda95c8597c67c9ea1119eaa3e921fb1a80727c049a2904038d025cf40c5bd50",
+      "fingerprint": "92ee4b4d79244e8fa544994f5d9e6b7ba65c51535559c74a3e21626614d4b122",
+      "means": {
+        "reflectance": 0.0034282493271636876,
+        "spectral": 0.9003644765069626,
+        "spatial": 0.023240478049103022,
+        "synthesis": 0.004410512461575526,
+        "ha_metric": 0.13732506256795998,
+        "om_metric": 0.7327794038424201,
+        "im_metric": 0.12989553511204865
+      }
+    },
+    {
+      "label": "a2",
+      "checkpoint": "it12000",
+      "n_pairs": 1199,
+      "n_nonfinite": {
+        "reflectance": 0,
+        "spectral": 0,
+        "spatial": 0,
+        "synthesis": 0,
+        "ha_metric": 0,
+        "om_metric": 0,
+        "im_metric": 0
+      },
+      "weights_sha256": "83428185fe43b68ae162a7a78c0ac143ce63558cfb8090a5b0ea1e5124e38202",
+      "fingerprint": "92ee4b4d79244e8fa544994f5d9e6b7ba65c51535559c74a3e21626614d4b122",
+      "means": {
+        "reflectance": 0.003198582930068939,
+        "spectral": 0.7641632400446877,
+        "spatial": 0.005709370108844821,
+        "synthesis": 0.004054270413633484,
+        "ha_metric": 0.12832151947106488,
+        "om_metric": 0.7525003133364973,
+        "im_metric": 0.11917816910945539
+      }
+    }
+  ]
+}

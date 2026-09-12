@@ -14,6 +14,7 @@ import { ResultProvider } from "./state/ResultContext";
 
 const DemoPage = lazy(() => import("./pages/DemoPage"));
 const DesignSystemPage = lazy(() => import("./pages/DesignSystemPage"));
+const ComparePage = lazy(() => import("./pages/ComparePage"));
 
 /** Built pages by nav path; any nav route not listed here renders the placeholder. */
 const PAGES: Record<string, ReactNode> = {
@@ -21,6 +22,7 @@ const PAGES: Record<string, ReactNode> = {
   "/novelty/spectral": <SpectralPage />,
   "/novelty/efficiency": <EfficiencyPage />,
   "/about": <AboutPage />,
+  "/compare": <Suspense><ComparePage /></Suspense>,
 };
 
 const router = createBrowserRouter([

@@ -33,6 +33,16 @@
   --color-bad: #f87171;
   --color-lit: #a5b4fc; /* "Literature" badge */
 
+  /* Categorical chart series, in fixed order (never cycled). Slots 2-5 are the
+     dataviz reference palette's dark steps; slot 1 is the brand accent so "ours"
+     reads as ours. Validated on #0a101c: every adjacent pair CVD dE >= 13.2,
+     normal-vision dE >= 19.3, all >= 3:1 contrast. */
+  --color-series-1: #22d3ee;
+  --color-series-2: #d95926;
+  --color-series-3: #9085e9;
+  --color-series-4: #d55181;
+  --color-series-5: #c98500;
+
   /* ---- type ---- */
   --font-display: "Space Grotesk Variable", "Segoe UI", system-ui, sans-serif;
   --font-sans: "Inter Variable", "Segoe UI", system-ui, sans-serif;

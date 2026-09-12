@@ -1137,6 +1137,9 @@ smoke:
     figure: {path: outputs/figures/day3_consistency_vs_iter_smoke.png}
     report_md: outputs/metrics/day3_results_smoke.md
     report_json: outputs/metrics/day3_results_smoke.json
+  compare_snapshot:
+    output_json: outputs/metrics/opensr_seven_smoke.json
+    allow_nonfinite: true
   calibrate_uncertainty:
     # A tiny random-weight checkpoint written in src/train.py's format and
     # read back through model_from_checkpoint, so the loading path is exercised
@@ -1715,6 +1718,17 @@ eval_all_ckpts:
   report_json: reports/day3_results.json
   # Smoke only: write tiny random-weight run directories to score.
   fabricate_runs: false
+
+# The /compare page's measured rows: all seven opensr-test means for each row's
+# SELECTED checkpoint, averaged from the eval_all_ckpts per-pair cache by
+# scripts/snapshot_opensr_seven.py. frontend/tests/compare.test.ts checks the
+# page against output_json.
+compare_snapshot:
+  rows: [bicubic, runA, a2]
+  output_json: reports/compare/opensr_seven.json
+  # A non-finite per-pair score fails the snapshot. Smoke overrides this: its
+  # random-weight runs leave `spatial` NaN (see smoke.eval_all_ckpts).
+  allow_nonfinite: false
 
 # Day 3 A2-vs-B read-out, read by scripts/day3_ab_report.py. Reuses the
 # eval_all_ckpts per-pair tables and selection rule above; adds only the full-
