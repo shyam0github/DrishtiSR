@@ -2,7 +2,7 @@
   "what": "P0 predictor smoke: one VAL patch through A2 via TorchPredictor",
   "checkpoint_id": "a2-last-dce224ec",
   "checkpoint_path": "D:\\SIH\\DrishtiSR\\runs\\day3\\a2\\last.pt",
-  "git_sha": "1e7986eebcb06183646d64224044d81a5847b9cc",
+  "git_sha": "4d208b19e78c56205d46e226b693d97c8ed4d588",
   "git_dirty": true,
   "split": "val",
   "n_samples": 1,
@@ -29,5 +29,5 @@
     "has_scale_head": false
   },
   "interim": false,
-  "timestamp_utc": "2026-09-11T17:49:24+00:00"
+  "timestamp_utc": "2026-09-12T09:37:18+00:00"
 }

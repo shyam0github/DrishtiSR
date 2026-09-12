@@ -241,9 +241,9 @@
   ],
   "floor_train_op": 0.005733285642895423,
   "blur_index_min": 0.9,
-  "git_sha": "00aa18b42b85f7ed981291bf22a2b4fc36ff6a8e",
+  "git_sha": "4d208b19e78c56205d46e226b693d97c8ed4d588",
   "git_dirty": true,
-  "timestamp_utc": "2026-09-12T04:37:42+00:00",
+  "timestamp_utc": "2026-09-12T09:35:33+00:00",
   "test_guard": {
     "split": "val",
     "action": "none"

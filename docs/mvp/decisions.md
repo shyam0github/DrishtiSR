@@ -71,3 +71,6 @@ P11 | Space image pre-downloads the LPIPS AlexNet weights at build time and runs
 P11 | make_tables --split val rerun changed only uncertainty_table.md (3 rows filled), ablation.json and headline.json provenance (git_sha, timestamp) | tta4/tta8/learned unc_eval JSONs already existed, so the uncertainty evals were not rerun.
 P11 | Space Dockerfile not build-tested: staging (robocopy, 47.9 MB, scratchpad) succeeded; `docker build` failed because the Docker Desktop daemon was not running; not started | Starting Docker Desktop is outside the session's scope; logged as a P12 pre-publish check.
 P11 | No Co-Authored-By trailer on the P11 commit | RULES.md Git section forbids it.
+P12 | Served uncertainty stays TTA (tta=4 default in app/server.py); learned_laplace remains opt-in via DRISHTI_UNC_CKPT; no packed-model export | Gate = watch not collapsed AND AUSE(learned) ≤ AUSE(tta8). Watch "passed", but AUSE learned 0.00271 > tta8 0.00182 (unc_eval_*.json, VAL n=128); ρ 0.379 vs 0.542.
+P12 | Kaggle fallback not prepared (N/A) | unc_cpu_speed.json needs_kaggle=false and CPU training c1 completed (2000 it).
+P12 | Idle benchmark not rerun; bench_a2-last-dce224ec.json kept (provisional=false, load 0 % at 2026-09-11T18:57Z) | The session's permission checks refused both stopping the leftover serve.py on :8000 and running bench_cpu.py.
