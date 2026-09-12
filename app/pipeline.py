@@ -233,6 +233,16 @@ class Engine:
                                             self.refs["cons_display_max"], "viridis"),
                         jd / "consistency.png")
         images["consistency"] = url("consistency.png")
+        # Reconstruction-consistency check, shown beside lr_rgb: D(SR) at 10 m, nearest x4 like
+        # lr_rgb, with the LR's stretch, so any visible difference is the model's, not the render's.
+        render.save_png(render.to_png_array(render.lr_display(trust.degrade(tr.sr)), params, "rgb"),
+                        jd / "sr_degraded_rgb.png")
+        images["sr_degraded_rgb"] = url("sr_degraded_rgb.png")
+        # Spectral-angle map D(SR) vs LR on a fixed scale: saturates at the GT HR's own mean angle.
+        render.save_png(render.overlay_rgba(render.upsample_map(tr.cons_sam_deg, trust.SCALE),
+                                            self.refs["spec_sam_gt_floor_deg"], "viridis"),
+                        jd / "consistency_sam.png")
+        images["consistency_sam"] = url("consistency_sam.png")
 
         # --- GeoTIFF downloads
         write_sr_tif(jd / "sr.tif", tr.sr, profile)

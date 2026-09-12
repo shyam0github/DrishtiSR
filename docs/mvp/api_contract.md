@@ -22,7 +22,9 @@ POST /api/upscale (multipart/form-data)
     "lr_rgb":url, "lr_fcc":url, "bicubic_rgb":url, "bicubic_fcc":url, "sr_rgb":url, "sr_fcc":url,
     "hr_rgb":url|null, "hr_fcc":url|null,
     "uncertainty":url|null,
-    "consistency":url
+    "consistency":url,
+    "sr_degraded_rgb":url,
+    "consistency_sam":url
   },
   "downloads": {"sr_tif":url, "uncertainty_tif":url|null},
   "metrics": {
@@ -51,7 +53,7 @@ GET /files/{job_id}/{name} → PNG or GeoTIFF
 - spec_* = degrade(X) compared with LR, using the training degradation operator. Bicubic sits near 0; HR sits at the floor; low values alone can mean blur.
 - hf_ratio_vs_bicubic = HF energy(SR) / HF energy(bicubic); bicubic = 1.0.
 - SR shown and measured = single forward pass (no self-ensemble). TTA outputs are used only for uncertainty.
-- Overlays: RGBA PNG at SR size, fixed scales 0..unc_display_max and 0..cons_display_max (never per-image min–max). Consistency map is the 10 m map nearest-upsampled ×4.
+- Overlays: RGBA PNG at SR size, fixed scales 0..unc_display_max and 0..cons_display_max (never per-image min–max). Consistency map is the 10 m map nearest-upsampled ×4. `consistency_sam` is the per-pixel spectral angle D(SR) vs LR on the fixed scale 0..spec_sam_gt_floor_deg (saturates at the GT HR's own mean angle). `sr_degraded_rgb` is D(SR) rendered exactly like `lr_rgb` (nearest ×4, LR stretch), for a side-by-side reconstruction check.
 - Display stretch: per-band 2–98 percentile computed on the LR input, applied identically to LR, bicubic, SR and HR. RGB uses the inventory band order; FCC = NIR, R, G.
 - UI ordering: with_gt present → LPIPS, spectral consistency, sharpness, then SSIM, SAM, ERGAS, PSNR last. Absent → spectral consistency, sharpness, uncertainty, runtime.
 - Blur guard: hf_ratio_vs_bicubic < sharpness_warn_below → UI warns that low spectral error can come from blur.

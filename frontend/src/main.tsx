@@ -6,6 +6,7 @@ import { AppShell } from "./layout/AppShell";
 import { AboutPage } from "./pages/AboutPage";
 import { HomePage } from "./pages/HomePage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
+import { SpectralPage } from "./pages/SpectralPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { DEMO_PATH, DESIGN_PATH, NAV_ROUTES } from "./routes";
 import { ResultProvider } from "./state/ResultContext";
@@ -16,6 +17,7 @@ const DesignSystemPage = lazy(() => import("./pages/DesignSystemPage"));
 /** Built pages by nav path; any nav route not listed here renders the placeholder. */
 const PAGES: Record<string, ReactNode> = {
   "/": <HomePage />,
+  "/novelty/spectral": <SpectralPage />,
   "/about": <AboutPage />,
 };
 

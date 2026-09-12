@@ -1,0 +1,249 @@
+{
+  "source": "reports/day3_results.json",
+  "report_md": "reports/day3_results.md",
+  "written_utc": "2026-09-10T08:15:33+00:00",
+  "fingerprint": "92ee4b4d79244e8fa544994f5d9e6b7ba65c51535559c74a3e21626614d4b122",
+  "n_pairs": 1199,
+  "n_tiles": 300,
+  "headline": "Run B lowers opensr-test's consistency error (`reflectance`) from 0.00320 to 0.00213 (-33.3%); the tile-clustered 95% CI on the per-pair mean delta is [-0.00113, -0.001], and the CI excludes zero, so this consistency gain is resolved, not noise.",
+  "cost": "B costs 0.105 dB PSNR against A2 (tile CI [-0.113, -0.0979] dB, resolved), and moves LPIPS by +0.0130 (resolved).",
+  "comparison": "Run B (B1) minus Run A2 (control), per validation pair; B2 has no significance test in the report",
+  "floor": {
+    "reflectance": 0.004782443621845941,
+    "spectral": 1.0911493600906184,
+    "l1_spec": 0.005733285642895423,
+    "sam_spec_deg": 1.2747580170692454
+  },
+  "methods": [
+    {
+      "label": "bicubic",
+      "display": "Bicubic",
+      "checkpoint": "bicubic",
+      "role": "baseline",
+      "lambdas": "—",
+      "means": {
+        "reflectance": 0.0021704580961115195,
+        "spectral": 0.5151552355120439,
+        "l1_spec": 0.001210044656468084,
+        "sam_spec_deg": 0.2924518684434008
+      },
+      "distribution": {
+        "l1_spec": {
+          "min": 0.00024261337239295244,
+          "p5": 0.00042996321863029155,
+          "q1": 0.0006721918471157551,
+          "median": 0.0009741443209350109,
+          "q3": 0.0014183847233653069,
+          "p95": 0.002905469317920505,
+          "max": 0.005374339409172535
+        },
+        "sam_spec_deg": {
+          "min": 0.06484927109532573,
+          "p5": 0.11570722384306166,
+          "q1": 0.17061148204073362,
+          "median": 0.24070261649914002,
+          "q3": 0.35080491907420175,
+          "p95": 0.6697950251018095,
+          "max": 1.4373404199041346
+        }
+      },
+      "per_pair_source": "outputs/metrics/eval_all_ckpts/bicubic/bicubic/per_pair.csv"
+    },
+    {
+      "label": "a2",
+      "display": "Run A2 (control)",
+      "checkpoint": "it12000",
+      "role": "control",
+      "lambdas": "0 / 0",
+      "means": {
+        "reflectance": 0.003198582930068939,
+        "spectral": 0.7641632400446877,
+        "l1_spec": 0.0027610914665856393,
+        "sam_spec_deg": 0.6862874175185814
+      },
+      "distribution": {
+        "l1_spec": {
+          "min": 0.0005896760849282146,
+          "p5": 0.000996706704609096,
+          "q1": 0.0015823751455172896,
+          "median": 0.002219573361799121,
+          "q3": 0.003194605349563062,
+          "p95": 0.006324980128556476,
+          "max": 0.01497921347618103
+        },
+        "sam_spec_deg": {
+          "min": 0.19942440827080762,
+          "p5": 0.2917457567528119,
+          "q1": 0.4156487607027459,
+          "median": 0.563337247434844,
+          "q3": 0.8201851504714248,
+          "p95": 1.4816457439602313,
+          "max": 4.829800931939851
+        }
+      },
+      "per_pair_source": "outputs/metrics/eval_all_ckpts/a2/it12000/per_pair.csv"
+    },
+    {
+      "label": "b1",
+      "display": "Run B (B1)",
+      "checkpoint": "it12000",
+      "role": "treatment",
+      "lambdas": "0.1 / 0.02",
+      "means": {
+        "reflectance": 0.0021344278714053224,
+        "spectral": 0.4218829818772116,
+        "l1_spec": 0.0013963996882726043,
+        "sam_spec_deg": 0.21181540736119306
+      },
+      "distribution": {
+        "l1_spec": {
+          "min": 0.0002291867567691952,
+          "p5": 0.0004417992022354156,
+          "q1": 0.0007128108118195087,
+          "median": 0.0010798004223033786,
+          "q3": 0.001626056560780853,
+          "p95": 0.0034388767788186662,
+          "max": 0.011109323240816593
+        },
+        "sam_spec_deg": {
+          "min": 0.06457070743291632,
+          "p5": 0.0870100172925878,
+          "q1": 0.12144949461238096,
+          "median": 0.16130840420541925,
+          "q3": 0.24444195830673687,
+          "p95": 0.5115963393244318,
+          "max": 2.2534113152155526
+        }
+      },
+      "per_pair_source": "outputs/metrics/eval_all_ckpts/b1/it12000/per_pair.csv"
+    },
+    {
+      "label": "b2",
+      "display": "Run B2",
+      "checkpoint": "it12000",
+      "role": "supplementary",
+      "lambdas": "0.3 / 0.06",
+      "means": {
+        "reflectance": 0.001344282560556684,
+        "spectral": 0.3358210512841613,
+        "l1_spec": 0.00020037471055435837,
+        "sam_spec_deg": 0.05230106518846668
+      },
+      "distribution": {
+        "l1_spec": {
+          "min": 0.00004832107879337855,
+          "p5": 0.00006912830940564163,
+          "q1": 0.00009692731691757217,
+          "median": 0.00013567741552833468,
+          "q3": 0.00020950359612470493,
+          "p95": 0.0005215141340158872,
+          "max": 0.0037411360535770655
+        },
+        "sam_spec_deg": {
+          "min": 0.031597949204359925,
+          "p5": 0.03426452475894699,
+          "q1": 0.037729488062527725,
+          "median": 0.04272728888964613,
+          "q3": 0.05284942413382673,
+          "p95": 0.09563348196733656,
+          "max": 0.846997244821295
+        }
+      },
+      "per_pair_source": "outputs/metrics/eval_all_ckpts/b2/it12000/per_pair.csv"
+    }
+  ],
+  "significance": [
+    {
+      "metric": "reflectance",
+      "better": "lower",
+      "n": 1199,
+      "n_clusters": 300,
+      "mean_control": 0.003198582930068939,
+      "mean_treatment": 0.0021344278714053224,
+      "mean_delta": -0.0010641550586636163,
+      "median_delta": -0.0009016399271786,
+      "frac_treatment_better": 1,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.001100329679989906,
+        -0.0010288417275510144
+      ],
+      "ci_tile": [
+        -0.0011301458526752435,
+        -0.000999883933559127
+      ],
+      "p_wilcoxon_pair": 1.1840641366232567e-197,
+      "p_wilcoxon_tile": 6.083559849691438e-51,
+      "verdict": "treatment better"
+    },
+    {
+      "metric": "spectral",
+      "better": "lower",
+      "n": 1199,
+      "n_clusters": 300,
+      "mean_control": 0.7641632400446877,
+      "mean_treatment": 0.4218829818772116,
+      "mean_delta": -0.34228025816747604,
+      "median_delta": -0.28516682982444763,
+      "frac_treatment_better": 1,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.354245453006786,
+        -0.3308898419669959
+      ],
+      "ci_tile": [
+        -0.3625959791000164,
+        -0.3220662320709122
+      ],
+      "p_wilcoxon_pair": 1.1840641366232567e-197,
+      "p_wilcoxon_tile": 6.083559849691438e-51,
+      "verdict": "treatment better"
+    },
+    {
+      "metric": "l1_spec",
+      "better": "lower",
+      "n": 1199,
+      "n_clusters": 300,
+      "mean_control": 0.0027610914665856393,
+      "mean_treatment": 0.0013963996882726043,
+      "mean_delta": -0.0013646917783130346,
+      "median_delta": -0.0011408505961298,
+      "frac_treatment_better": 1,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.0014100146975133988,
+        -0.0013198209134583929
+      ],
+      "ci_tile": [
+        -0.0014478272169535938,
+        -0.0012828177596523865
+      ],
+      "p_wilcoxon_pair": 1.1840641366232567e-197,
+      "p_wilcoxon_tile": 6.083559849691438e-51,
+      "verdict": "treatment better"
+    },
+    {
+      "metric": "sam_spec_deg",
+      "better": "lower",
+      "n": 1199,
+      "n_clusters": 300,
+      "mean_control": 0.6862874175185814,
+      "mean_treatment": 0.21181540736119306,
+      "mean_delta": -0.4744720101573884,
+      "median_delta": -0.40366434003031226,
+      "frac_treatment_better": 1,
+      "ci": 0.95,
+      "ci_pair": [
+        -0.4896992476026151,
+        -0.4597652479622017
+      ],
+      "ci_tile": [
+        -0.5019035159968159,
+        -0.4473616918969038
+      ],
+      "p_wilcoxon_pair": 1.1840641366232567e-197,
+      "p_wilcoxon_tile": 6.083559849691438e-51,
+      "verdict": "treatment better"
+    }
+  ]
+}

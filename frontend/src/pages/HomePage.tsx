@@ -73,6 +73,10 @@ const DEEP_LINKS = [
 ];
 
 export function HomePage() {
+  // Novelty pages link to /#try-it; the router does not scroll to hashes by itself.
+  useEffect(() => {
+    if (window.location.hash === `#${UPLOAD_SECTION_ID}`) document.getElementById(UPLOAD_SECTION_ID)?.scrollIntoView();
+  }, []);
   return (
     <>
       <Hero />

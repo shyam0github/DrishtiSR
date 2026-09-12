@@ -281,6 +281,10 @@ export interface UpscaleResponse {
     hr_fcc: string | null;
     uncertainty: string | null;
     consistency: string;
+    /** D(SR): the SR degraded back to 10 m, rendered like lr_rgb. Absent from servers older than the spectral page. */
+    sr_degraded_rgb?: string;
+    /** Per-pixel spectral angle D(SR) vs LR, fixed scale 0..refs.spec_sam_gt_floor_deg. Absent from older servers. */
+    consistency_sam?: string;
   };
   downloads: { sr_tif: string; uncertainty_tif: string | null };
   metrics: {
@@ -342,6 +346,25 @@ export interface ImageMetrics {
   runtimeMsTotal: number | null;
 }
 
+/**
+ * The reconstruction-consistency check for one image: D(SR) against the LR,
+ * in surface reflectance (L1) and degrees (spectral angle). `null` = not
+ * measured (MOCK_MODE), never zero.
+ */
+export interface SpectralCheck {
+  samDeg: number | null;
+  samDegBicubic: number | null;
+  /** The true 2.5 m image scored the same way on full VAL: a reference point, not a lower bound. */
+  l1GtFloor: number | null;
+  samGtFloorDeg: number | null;
+  /** This image's own 2.5 m reference, degraded and compared with its LR. Null without a reference. */
+  l1Hr: number | null;
+  samHrDeg: number | null;
+  /** Fixed overlay scales the server rendered with (never per-image min-max). */
+  l1DisplayMax: number | null;
+  samDisplayMax: number | null;
+}
+
 /** One image's result, shared app-wide through ResultContext. */
 export interface ImageResult {
   mode: "mock" | "live";
@@ -350,10 +373,23 @@ export interface ImageResult {
   sourceLabel: string;
   lrSize: [number, number] | null;
   srSize: [number, number] | null;
-  images: { lr: string; sr: string; bicubic: string | null; hr: string | null; uncertainty: string | null; consistency: string | null };
+  images: {
+    lr: string;
+    sr: string;
+    bicubic: string | null;
+    hr: string | null;
+    uncertainty: string | null;
+    /** Per-pixel L1 |D(SR) - LR|, fixed scale 0..spectral.l1DisplayMax. */
+    consistency: string | null;
+    /** D(SR) at 10 m, same render as `lr`. Null in MOCK_MODE or from an older server. */
+    srDegraded: string | null;
+    /** Per-pixel spectral angle D(SR) vs LR, fixed scale 0..spectral.samDisplayMax. */
+    consistencySam: string | null;
+  };
   srTifUrl: string | null;
   hasGroundTruth: boolean;
   metrics: ImageMetrics;
+  spectral: SpectralCheck;
   model: ModelInfo | null;
   uncertaintyMethod: UncertaintyMethod | null;
   warnings: string[];
@@ -381,9 +417,22 @@ export function toImageResult(resp: UpscaleResponse, sourceLabel: string): Image
       hr: mvpUrlOrNull(resp.images.hr_rgb),
       uncertainty: mvpUrlOrNull(resp.images.uncertainty),
       consistency: mvpUrl(resp.images.consistency),
+      srDegraded: mvpUrlOrNull(resp.images.sr_degraded_rgb ?? null),
+      consistencySam: mvpUrlOrNull(resp.images.consistency_sam ?? null),
     },
     srTifUrl: mvpUrl(resp.downloads.sr_tif),
     hasGroundTruth: gt !== null,
+    spectral: {
+      samDeg: rf.spec_sam_deg,
+      samDegBicubic: rf.spec_sam_bicubic_deg,
+      l1GtFloor: resp.refs.spec_l1_gt_floor,
+      samGtFloorDeg: resp.refs.spec_sam_gt_floor_deg,
+      l1Hr: gt?.spec_l1_hr ?? null,
+      samHrDeg: gt?.spec_sam_hr_deg ?? null,
+      l1DisplayMax: resp.refs.cons_display_max,
+      // app/pipeline.py renders consistency_sam on 0..spec_sam_gt_floor_deg.
+      samDisplayMax: resp.images.consistency_sam ? resp.refs.spec_sam_gt_floor_deg : null,
+    },
     metrics: {
       psnr: gt?.sr.psnr ?? null,
       ssim: gt?.sr.ssim ?? null,
@@ -427,9 +476,10 @@ function mockUpscale(sourceLabel: string): ImageResult {
     sourceLabel: `${sourceLabel} · PLACEHOLDER`,
     lrSize: [lr, lr],
     srSize: [hr, hr],
-    images: { lr: placeholderUrl("lr.png"), sr: placeholderUrl("hr.png"), bicubic: null, hr: null, uncertainty: placeholderUrl("uncertainty.png"), consistency: null },
+    images: { lr: placeholderUrl("lr.png"), sr: placeholderUrl("hr.png"), bicubic: null, hr: null, uncertainty: placeholderUrl("uncertainty.png"), consistency: null, srDegraded: null, consistencySam: null },
     srTifUrl: null,
     hasGroundTruth: false,
+    spectral: { samDeg: null, samDegBicubic: null, l1GtFloor: null, samGtFloorDeg: null, l1Hr: null, samHrDeg: null, l1DisplayMax: null, samDisplayMax: null },
     metrics: { psnr: null, ssim: null, lpips: null, bicubic: null, specL1: null, specL1Bicubic: null, hfRatioVsBicubic: null, sharpnessWarnBelow: null, runtimeMsTotal: null },
     model: null,
     uncertaintyMethod: null,

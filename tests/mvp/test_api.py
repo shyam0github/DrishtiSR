@@ -67,7 +67,8 @@ UPSCALE = obj({
     "model": MODEL,
     "uncertainty_method": {"enum": ["none", "tta4", "tta8", "learned_laplace"]},
     "images": obj({**{k: URL for k in ("lr_rgb", "lr_fcc", "bicubic_rgb", "bicubic_fcc", "sr_rgb",
-                                        "sr_fcc", "consistency")},
+                                        "sr_fcc", "consistency", "sr_degraded_rgb",
+                                        "consistency_sam")},
                    "hr_rgb": URL_N, "hr_fcc": URL_N, "uncertainty": URL_N}),
     "downloads": obj({"sr_tif": URL, "uncertainty_tif": URL_N}),
     "metrics": obj({
