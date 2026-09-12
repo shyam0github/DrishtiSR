@@ -1,0 +1,19 @@
+{
+  "config_hash": "e6082c6900000000000000000000000000000000000000000000000000000000",
+  "git": {
+    "commit": "fb8659d000000000000000000000000000000000",
+    "dirty": false
+  },
+  "git_sha": "fb8659d000000000000000000000000000000000",
+  "git_dirty": false,
+  "args": {
+    "n_resblocks": 16,
+    "n_feats": 48,
+    "iters": 200,
+    "wd": 0.0,
+    "seed": 1337,
+    "spectral_lambda1": 0.1,
+    "spectral_lambda2": 0.02,
+    "out": "/kaggle/working/runs/b1"
+  }
+}

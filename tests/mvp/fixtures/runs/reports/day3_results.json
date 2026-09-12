@@ -1,0 +1,11 @@
+{
+  "floor": {
+    "l1_spec": 0.005733,
+    "reflectance": 0.00478
+  },
+  "selections": {
+    "runA": {
+      "selected": "it00200"
+    }
+  }
+}
