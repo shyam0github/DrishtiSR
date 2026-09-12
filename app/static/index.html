@@ -84,8 +84,9 @@
           <dt>Per-pixel uncertainty map</dt>
           <dd>Where the model is unsure (TTA disagreement or a learned σ), shown on a fixed scale, never min–max.
             <button type="button" class="goto" data-goto="uncertainty">Evidence: uncertainty overlay + legend</button></dd>
-          <dt>≤ 1 M parameters, INT8, CPU-only</dt>
+          <dt>≤ 1 M-parameter ONNX model, CPU-only inference (6 threads)</dt>
           <dd>A compact EDSR that runs on a laptop CPU with no GPU; size, backend and threads are in the header.
+            <span class="muted">INT8 build measured at 981 KB / 782 ms but not shipped: it failed its accuracy gate.</span>
             <button type="button" class="goto" data-goto="model">Evidence: model badge + runtime</button></dd>
         </dl>
       </details>

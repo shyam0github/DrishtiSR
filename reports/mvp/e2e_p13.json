@@ -1,0 +1,93 @@
+{
+  "port": 8000,
+  "timestamp": "2026-09-12T16:59:42.274594+05:30",
+  "git_sha": "382802ba04204c3b3b02ea464f17f23468e93d97",
+  "git_dirty": true,
+  "startup_s": 5.0,
+  "health": {
+    "backend": "onnx-fp32",
+    "checkpoint_id": "a2-last-dce224ec",
+    "params": 855652,
+    "model_bytes": 3441761,
+    "threads": 6,
+    "interim": false,
+    "all_model_keys": [
+      "backend",
+      "checkpoint_id",
+      "has_scale_head",
+      "interim",
+      "model_bytes",
+      "params",
+      "threads"
+    ]
+  },
+  "samples": {
+    "count": 8,
+    "has_gt_true": 6,
+    "has_gt_false": 2,
+    "ids": [
+      "test-low-1",
+      "test-low-2",
+      "test-mid-1",
+      "test-mid-2",
+      "test-high-1",
+      "test-high-2",
+      "delhi-urban",
+      "delhi-mixed"
+    ]
+  },
+  "upscale_first_tta4": {
+    "sample_id": "test-low-1",
+    "http_status": 200,
+    "wall_s": 6.601,
+    "top_level_keys": [
+      "downloads",
+      "images",
+      "input",
+      "job_id",
+      "metrics",
+      "model",
+      "refs",
+      "uncertainty_method",
+      "warnings"
+    ],
+    "images_keys": [
+      "bicubic_fcc",
+      "bicubic_rgb",
+      "consistency",
+      "hr_fcc",
+      "hr_rgb",
+      "lr_fcc",
+      "lr_rgb",
+      "sr_fcc",
+      "sr_rgb",
+      "uncertainty"
+    ],
+    "sr_image": true,
+    "bicubic_image": true,
+    "uncertainty_overlay": true,
+    "consistency_overlay": true,
+    "uncertainty_method": "tta4",
+    "sr_geotiff_download": true,
+    "lpips_sr": 0.04545551538467407,
+    "lpips_bicubic": 0.05250582844018936,
+    "sr_tif_get": {
+      "status": 200,
+      "bytes": 2795790
+    }
+  },
+  "upscale_no_gt": {
+    "sample_id": "delhi-urban",
+    "label": "Delhi \u00b7 Sentinel-2 L2A \u00b7 no ground truth (dense urban)",
+    "http_status": 200,
+    "wall_s": 6.941,
+    "with_gt_is_null": true
+  },
+  "upscale_first_tta0": {
+    "sample_id": "test-low-1",
+    "http_status": 200,
+    "wall_s": 1.736,
+    "faster_than_tta4": true
+  },
+  "port_free_after": true
+}

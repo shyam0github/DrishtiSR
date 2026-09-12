@@ -12,7 +12,7 @@ SEN2NAIPv2 and demonstrated on Delhi. Team name "Turing Testers" —
 Verification needed: the name appears nowhere in the repo. Three contributions:
 1. **Spectral consistency** — the SR output degraded back to 10 m must reproduce the LR reflectance.
 2. **Per-pixel uncertainty** — heteroscedastic log-variance head, with TTA disagreement as the fallback.
-3. **CPU-only deployment** — ≤1,000,000 params, INT8 ONNX, 6-thread inference (AGENTS.md §1).
+3. **CPU-only deployment** — ≤1,000,000 params, ONNX, 6-thread inference (AGENTS.md §1). FP32 ships; the INT8 build failed its accuracy gate (§6).
 
 ## 2. Frozen decisions & rules (do NOT change)
 
@@ -50,8 +50,8 @@ Verification needed: the name appears nowhere in the repo. Three contributions:
 | 3 | A2 vs B comparison | ✅ winner A2 | `reports/day3_ab_metrics.csv`, `reports/checkpoints/day3_p1_results.md` |
 | 3 | Uncertainty/TTA start | ✅ superseded by the Day 4 A2 evaluation (merged `afa86b7`) | commits `c183fa6`, `891c8e0`; `reports/mvp/uncertainty_table.md` |
 | 3 | React/MapLibre skeleton | ✅ mocked API | commits `9c6f164`, `34e80f2`; `reports/checkpoints/day3_p3_web.md` |
-| 4 | Run C | ⏭️ | — |
-| 4 | Collapse watch | ⏭️ | — |
+| 4 | Run C | ✅ trained, not served: post-hoc Laplace head on frozen A2, 2,000 CPU it; lost to TTA on AUSE | `runs/mvp/unc_c1/` (gitignored), `reports/mvp/unc_eval_*.json`, `docs/mvp/decisions.md` P12 |
+| 4 | Collapse watch | ✅ passed (ρ 0.21 → 0.37, frac_floor 0) | `docs/mvp/HANDOFF.md` Gates; `reports/checkpoints/p12_finalize.md` |
 | 4 | ONNX export | ✅ FP32 served; INT8 gate FAILED on all 4 rungs (981 KB graph benched, not served) | `reports/mvp/quant_gate.json`, `reports/mvp/onnx_parity_a2-last-dce224ec.json`; graphs in gitignored `artifacts/onnx/` |
 | 4 | CPU inference (deployment path) | ✅ onnx-fp32 median 1220 ms, 256² LR, 6 threads, provisional=false | `reports/mvp/bench_a2-last-dce224ec.json` |
 | 4 | Uncertainty validation | ✅ VAL n=128, AUSE: TTA-4 0.0019 · TTA-8 0.0018 · learned head 0.0027 | `reports/mvp/unc_eval_*.json`, `reports/mvp/uncertainty_table.md` |
@@ -124,6 +124,8 @@ Verification needed: the name appears nowhere in the repo. Three contributions:
 - **Operator question (partly answered).** The training spectral loss uses `area` (an exact 4×4 block mean), per `frozen_day3.yaml` `loss.spectral_downsample`, `runs/day3/b2/args.json` and `src/losses/spectral.py`. B2's area L1 of 0.00020 against its opensr 0.00134 fits "B fits its own operator". Verification needed: opensr-test's internal degradation operator is not recorded in the repo.
 - **Blur-measure disagreement.** HF energy says B is blurrier (0.087 → 0.083 → 0.081 × GT); Sobel says it is sharper (0.449 → 0.473 → 0.497). This may be edge overshoot, to be tested by the Day 6 ringing measurement.
 - Only 2 checkpoints per Day 3 run survived; the trainer was fixed in `891c8e0` (`reports/checkpoints/day3_p1_results.md`).
+- **Export (P12, resolved):** ONNX FP32 is exported and served from gitignored `artifacts/onnx/a2-last-dce224ec/` (3.44 MB; median 1220 ms at 256² LR, 6 threads, `reports/mvp/bench_a2-last-dce224ec.json`). The INT8 graph was built (981 KB, 782 ms) but is NOT served: its accuracy gate failed (`reports/mvp/quant_gate.json`). The consistency-projection gate also FAILED, so projection is not served. Served uncertainty is TTA-4; the learned head lost on AUSE (0.00271 vs TTA-8 0.00182; Spearman 0.379 vs 0.542). Night MVP merged at `afa86b7`, state commit `382802b`.
+- **Launch trap (P13):** a bare `python` in the repo's PowerShell resolves to `.venv-1` (Python 3.14, no deps), so `python scripts/serve.py` fails with `No module named 'uvicorn'`. Use `docs/RUN_DEMO.md`.
 - HF push is blocked: `scripts/push_to_hf.py` reads `HF_TOKEN`, which is unset in this shell.
 - The 1.52M-param Run A is over budget and is not a controlled comparison.
 - **Contradictions with the session brief (the repo wins):**
@@ -134,7 +136,6 @@ Verification needed: the name appears nowhere in the repo. Three contributions:
   - `reports/day3_data_validity.md` §4 words verdict (b) differently from the approved wording in §2 above.
 - Verification needed:
   - The Kaggle cache size of ≈3.62 GB. The local `.npz` total is 4.22 GB (3.93 GiB).
-  - INT8 ONNX ≈1 MB. Nothing is exported yet.
   - The Kaggle quota reset at 2026-09-12 05:28 IST. It is not in the repo.
 
 ## 7. Next action
