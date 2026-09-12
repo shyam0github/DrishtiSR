@@ -511,3 +511,20 @@ checked, `train` cannot return without a real entry point) and the console fix.
   Over 50 pairs, per-band r is median 0.973 and RMSE 0.005–0.011. In 32/50
   pairs, the per-band min and max DN are identical. The approved description of
   the training data is in `reports/day3_data_validity.md` §4.
+
+## 2026-09-12 — Night MVP merged into main (P12)
+
+- `mvp/night-build` merged with no conflicts as `afa86b7` and pushed. Worktree
+  tests passed 81/81; the E2E test in main passed 7/7. `/api/health` returns
+  onnx-fp32, `a2-last-dce224ec`, 855,652 params.
+- Served: A2 via ONNX FP32 (median 1220 ms at 256² LR on 6 threads,
+  provisional=false). INT8 failed its quality gate on all four rungs and is not
+  served. The consistency projection failed its gate and is off.
+- Uncertainty: TTA-4 stays the default. The learned Laplace head (Run C) passed
+  the collapse watch, but its AUSE is 0.00271 against TTA-8's 0.00182, so it is
+  opt-in only (`DRISHTI_UNC_CKPT`).
+- The Kaggle fallback was not needed: CPU head training finished.
+- The ONNX graphs, display samples and head checkpoint (all gitignored) were
+  copied from the worktree into main. The worktree folder remains, because its
+  untracked `runs/mvp` logs block `git worktree remove`.
+- Details: `reports/checkpoints/p12_finalize.md`, `docs/mvp/decisions.md`.

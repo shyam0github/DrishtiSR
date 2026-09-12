@@ -28,6 +28,7 @@ Verification needed: the name appears nowhere in the repo. Three contributions:
 - The governing blur measure is the HF-energy ratio (pre-registered); Sobel is reported alongside it.
 - Approved data wording (verdict b): "Real Sentinel-2 L2A 10 m inputs (B04, B03, B02, B08) paired with 2.5 m NAIP targets that the SEN2NAIPv2 authors co-registered and radiometrically harmonised to Sentinel-2 (crosssensor subset). Inputs are not synthetically degraded; matching per-band statistics between inputs and targets are expected from this harmonisation."
 - Decisions of 2026-09-11 (session brief): Day 3 P2 is cancelled, superseded by the night MVP build. Day 4 "Run C" = a post-hoc heteroscedastic Laplace head on the FROZEN A2 backbone, with its config frozen before training, CPU training, and no spectral term. Novelty 1 is carried by consistency maps/metrics plus a gated inference-time consistency projection. The MVP runs on CPU; Kaggle is a fallback only.
+- Decisions of 2026-09-12 (P12, `docs/mvp/decisions.md`): Run C is the post-hoc Laplace scale head on frozen A2 (`unc_c1`, 2,000 CPU iterations, collapse watch passed). The consistency-projection gate FAILED (`reports/mvp/projection_gate.json`), so projection is not served. The served uncertainty is **TTA-4**. The learned head fails AUSE ≤ TTA-8 (0.00271 vs 0.00182), so it stays opt-in via `DRISHTI_UNC_CKPT`. The served backend is onnx-fp32.
 - Git: stage explicit paths only; no AI attribution in commits; never switch the branch of the shared tree (AGENTS.md §4).
 
 ## 3. Day-by-day status
@@ -47,29 +48,29 @@ Verification needed: the name appears nowhere in the repo. Three contributions:
 | 3 | opensr-test | ✅ | `reports/day3_opensr_derisk.md`; `requirements.txt` opensr-test==1.3.3 |
 | 3 | Spectral loss | ✅ built; did not help | `src/losses/spectral.py`; `reports/day3_results.md` |
 | 3 | A2 vs B comparison | ✅ winner A2 | `reports/day3_ab_metrics.csv`, `reports/checkpoints/day3_p1_results.md` |
-| 3 | Uncertainty/TTA start | 🟡 in progress on mvp/night-build | commits `c183fa6`, `891c8e0`; `reports/day3_tta_calibration_runA_best.md` |
+| 3 | Uncertainty/TTA start | ✅ superseded by the Day 4 A2 evaluation (merged `afa86b7`) | commits `c183fa6`, `891c8e0`; `reports/mvp/uncertainty_table.md` |
 | 3 | React/MapLibre skeleton | ✅ mocked API | commits `9c6f164`, `34e80f2`; `reports/checkpoints/day3_p3_web.md` |
 | 4 | Run C | ⏭️ | — |
 | 4 | Collapse watch | ⏭️ | — |
-| 4 | ONNX export | ⏭️ | `src/export/` holds only `model_card.py` |
-| 4 | CPU inference (deployment path) | ⏭️ | eager PyTorch CPU only (Day 2: 1.91 s/tile) |
-| 4 | Uncertainty validation | ⏭️ | TTA calibration exists for Run A only, not Run C |
-| 4 | FastAPI | ⏭️ | no backend in repo; `frontend/src/api/client.ts` is mocked |
+| 4 | ONNX export | ✅ FP32 served; INT8 gate FAILED on all 4 rungs (981 KB graph benched, not served) | `reports/mvp/quant_gate.json`, `reports/mvp/onnx_parity_a2-last-dce224ec.json`; graphs in gitignored `artifacts/onnx/` |
+| 4 | CPU inference (deployment path) | ✅ onnx-fp32 median 1220 ms, 256² LR, 6 threads, provisional=false | `reports/mvp/bench_a2-last-dce224ec.json` |
+| 4 | Uncertainty validation | ✅ VAL n=128, AUSE: TTA-4 0.0019 · TTA-8 0.0018 · learned head 0.0027 | `reports/mvp/unc_eval_*.json`, `reports/mvp/uncertainty_table.md` |
+| 4 | FastAPI | ✅ API contract v1, E2E 7/7 in main | `app/server.py`, `docs/mvp/api_contract.md`, `tests/mvp/test_e2e.py`; run `scripts/serve.py` |
 | 4 | Frontend connection | ⏭️ | — |
 | 5 | Delhi AOI end to end | ⏭️ | — |
-| 5 | Swipe | ⏭️ | slider exists against mock data (`dd9420f`) |
-| 5 | Uncertainty overlay | ⏭️ | — |
-| 5 | GeoTIFF download | ⏭️ | — |
+| 5 | Swipe | ✅ in the MVP UI against the live API (`frontend/` still mocked) | `app/static/`, `tests/mvp/test_ui_static.py` |
+| 5 | Uncertainty overlay | ✅ TTA-4 std overlay plus consistency map; learned head is opt-in only (its overlay saturates) | `reports/mvp/trust_scales.json`, `docs/mvp/decisions.md` P11/P12 |
+| 5 | GeoTIFF download | ✅ API job outputs (`/files/`); QGIS check still open | `tests/mvp/test_api.py` |
 | 5 | QGIS check | ⏭️ | — |
-| 5 | Metrics panel | ⏭️ | panel placeholder only (`9c6f164`) |
+| 5 | Metrics panel | ✅ in the MVP UI; leads with LPIPS and consistency | `app/static/index.html`, `reports/mvp/headline.json` |
 | 6 | Final eval bicubic/A/A2/B/C | ⏭️ | — |
 | 6 | Params + CPU latency | ⏭️ | — |
 | 6 | Ringing / flat-quartile HF | ⏭️ | tooling exists: `scripts/artefact_metrics.py` |
 | 6 | US→Delhi domain shift | ⏭️ | — |
 | 6 | Failure cases | ⏭️ | — |
 | 6 | Cloud gating / OOM fallback / AI warning | ⏭️ | — |
-| 7 | Write-up, README, cleanup | ⏭️ | — |
-| 7 | Backup video, judge Q&A, 110-s rehearsal | ⏭️ | — |
+| 7 | Write-up, README, cleanup | 🟡 README MVP section done; write-up pending | `README.md` between `MVP-DEMO:START/END` markers |
+| 7 | Backup video, judge Q&A, 110-s rehearsal | 🟡 demo script written; video, Q&A and rehearsal pending | `docs/mvp/demo_script.md` |
 
 ## 4. Key numbers (confirmed)
 
@@ -138,7 +139,7 @@ Verification needed: the name appears nowhere in the repo. Three contributions:
 
 ## 7. Next action
 
-Night MVP build in progress on branch mvp/night-build; P12 merges it into main.
+Build and run the Hugging Face Space image once (`docker build` + `docker run -p 7860:7860`, per `deploy/hf_space/README.md`) before publishing the demo.
 
 ## 8. How to update this file
 
