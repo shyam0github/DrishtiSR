@@ -61,3 +61,10 @@ P9 | Samples total 30.7 MB ≥ 25 MB → not committed (app/samples/.gitignore);
 P9 | Sample thumbnails served at /api/samples/{id}/thumb.png (only thumb.png, id regex-checked) | Contract gives thumb_url as a string without a route; no general static mount over app/samples.
 P9 | Same-origin: no CORS middleware; a POST whose Origin host ≠ Host gets 400 {"error"}; invalid tta/dn_mode → 422, XOR/size/bands/unknown sample → 400 | Contract lists 400/422/500 only.
 P9 | Non-finite scalar metrics (e.g. constant image, bicubic HF = 0) are returned as null with a warning | Starlette refuses NaN in JSON; this only happens on degenerate inputs.
+P6 | src/uncertainty/ package shadows legacy src/uncertainty.py; __init__ loads it by path and re-exports tta_predict/sr_output/TTAResult | Prompt mandates the package path; tests/test_tta.py and scripts/calibrate_uncertainty.py import src.uncertainty and still pass.
+P6 | 8-channel packed output served by running tiled.sr_array once per 4-channel half (ChannelSlice), like P4's OnnxPredictor | sr_array sizes its output buffer from the input band count; tiled.py must not be edited. b is still Hann-blended linearly.
+P6 | TRAIN stream = SRPatchDataset wiring rebuilt in train_unc.py with loader.split_file pinned to M\outputs\splits_sen2naipv2.csv (asserted file: source); cached_only drops uncached TRAIN tiles | SRPatchDataset has no override hook and recomputes the split when the worktree has no CSV.
+P6 | frac_floor computed over per-band b values (not band mean) | Stricter reading of "share of pixels with b < 2e-4"; more likely to flag collapse.
+P6 | Eval patches = P5 VAL pool, seed 26143, excluding the 128-patch watch subset (seed 26142) | Watch data is monitoring-only; keeping it out of scoring is the conservative choice.
+P6 | b0 = mean |SR-HR| over 128 TRAIN patches, drawn by default_rng(26142) from the epoch-0 augmented TRAIN stream | Prompt: TRAIN, 128 patches; seed reuses the MVP seed.
+P6 | No Co-Authored-By trailer on P6 commits | RULES.md Git section forbids it.

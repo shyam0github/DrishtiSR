@@ -1,0 +1,113 @@
+# DrishtiSR -- DRAFT config, Day 4 "Run C" (P6): post-hoc heteroscedastic
+# Laplace scale head on the FROZEN A2 backbone.
+#
+# DRAFT: config_hash is empty, so src/config.py::load_frozen REFUSES this file.
+# After tests pass it is copied to configs/frozen_day4_unc.yaml with
+# status: frozen and hashed with `python -m src.config --config ... --write`.
+# Smoke and training read ONLY the frozen copy.
+#
+# model / data / augment are copied BY VALUE from configs/frozen_day3.yaml
+# (hash e6082c69...), so the backbone and data geometry are the Day 3 ones.
+# The design rationale is docs/mvp/uncertainty_design.md.
+
+status: draft
+frozen_on: "2026-09-12"
+frozen_for: "Day 4 -- Run C: post-hoc Laplace scale head on frozen A2 (mean path untouched)"
+base_config: configs/base.yaml
+source_config: configs/frozen_day3.yaml
+source_config_hash: "e6082c69bba3086aaf71d0a413e64d621d860e5506da507ce2d76edb92f1fc0a"
+seed: 1337
+
+# The frozen backbone. interim=false (Day 3 addendum: A2 is the winner).
+init_backbone_checkpoint:
+  checkpoint_id: a2-last-dce224ec
+  path: "D:/SIH/DrishtiSR/runs/day3/a2/last.pt"
+  interim: false
+
+# No spectral term in Run C (RULES Day 3 addendum).
+lambda1: 0.0
+lambda2: 0.0
+
+model:
+  name: edsr_baseline
+  scale: 4
+  n_resblocks: 16
+  n_feats: 48
+  in_ch: 4
+  out_ch: 4
+  res_scale: 1.0
+  expected_parameters: 855652
+
+data:
+  module: src.data.adapter
+  cls: SRPatchDataset
+  data_root: auto
+  dataset_name: sen2naipv2
+  batch_size: 16
+  num_workers: 2
+  patch_lr: 64
+  scale: 4
+  train_split: train
+  val_split: val
+
+augment:
+  enabled: true
+  hflip_p: 0.5
+  vflip_p: 0.5
+  rot90_k: [0, 1, 2, 3]
+  photometric: false
+  splits: [train]
+
+unc:
+  distribution: laplace
+  # Tensor entering the upsampler tail.0 (LR-resolution body output), via a
+  # forward pre-hook; src/models/edsr.py is not edited.
+  branch_point: tail.0.input
+  head_hidden: 32
+  head_out: 64          # 4 bands x 16 (PixelShuffle 4)
+  pixel_shuffle: 4
+  b_floor: 1.0e-4       # b = b_floor + softplus(raw), reflectance units
+  b_units: reflectance
+  init:
+    last_conv_weight: zeros
+    last_conv_bias: b0
+    b0: mean_abs_sr_minus_hr
+    b0_n_train_patches: 128
+    b0_seed: 26142
+  nll:
+    beta: 0.0
+    mean_stopgrad: true
+  param_budget: 1000000
+  optim:
+    optimizer: adam
+    lr: 2.0e-4
+    min_lr: 1.0e-5
+    schedule: cosine
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+  iters: 4000
+  batch_size: 16        # data.batch_size
+  num_workers: 0        # RULES: DataLoader num_workers=0 on Windows
+  threads: 6
+  train_data:
+    cache_root: "D:/SIH/DrishtiSR/outputs/cache"
+    split_file: "D:/SIH/DrishtiSR/outputs/splits_sen2naipv2.csv"
+  watch:
+    every: 250
+    until: 2000
+    abort_at: 2000
+    split: val
+    n_patches: 128
+    seed: 26142
+    n_pixels_spearman: 200000
+    floor: 2.0e-4
+    rho_min: 0.10
+    frac_floor_max: 0.20
+    spatial_cv_min: 0.05
+    on_abort: stop_and_recommend_tta
+  calibration:
+    ause_fractions: 20
+    coverage_nominal: [0.5, 0.9]
+    coverage_half_widths: ["b*ln(2)", "b*ln(10)"]
+
+config_hash: ""
