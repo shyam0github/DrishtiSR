@@ -243,8 +243,20 @@ def test_files_path_traversal(client):
 
 
 def test_static_and_fixtures(client):
-    assert client.get("/").status_code == 200
+    from app.server import ui_dir
+
     assert client.get("/fixtures/health.json").status_code == 200
+    if not (ui_dir() / "index.html").is_file():
+        r = client.get("/")
+        assert r.status_code == 503 and "npm run build" in r.json()["error"]
+        return
+    index = client.get("/")
+    assert index.status_code == 200 and "text/html" in index.headers["content-type"]
+    # Client-side routes fall back to index.html; a missing asset stays a 404.
+    deep = client.get("/novelty/spectral")
+    assert deep.status_code == 200 and deep.text == index.text
+    assert client.get("/assets/does-not-exist.js").status_code == 404
+    assert client.get("/api/does-not-exist").status_code == 404
 
 
 def test_delhi_sample(client):

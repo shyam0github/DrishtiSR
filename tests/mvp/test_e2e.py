@@ -30,7 +30,7 @@ rasterio = pytest.importorskip("rasterio")
 from rasterio.io import MemoryFile  # noqa: E402
 
 ROOT = repo_root()
-STATIC = ROOT / "app" / "static"
+STATIC = ROOT / "frontend" / "dist"  # the UI app.server serves at /
 FIXTURES = ROOT / "app" / "fixtures"
 SAMPLES = ROOT / "app" / "samples"
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -185,6 +185,8 @@ def test_health_matches_fixture(server):
 
 
 def test_index_and_every_static_asset(server):
+    if not (STATIC / "index.html").is_file():
+        pytest.skip(f"web UI not built ({STATIC}); run `npm run build` in frontend/")
     r = server.get("/")
     assert r.status_code == 200 and "text/html" in r.headers["content-type"]
     refs = re.findall(r'(?:href|src)="([^"#:]+)"', r.text)

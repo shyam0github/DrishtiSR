@@ -1,6 +1,6 @@
 # DrishtiSR demo, Hugging Face Docker-SDK Space (CPU). Build context = a staging
 # folder that mirrors the repo layout (see deploy/hf_space/README.md, step 3):
-#   app/ src/ drishtisr/ configs/ artifacts/onnx/a2-last-dce224ec/
+#   app/ frontend/dist/ src/ drishtisr/ configs/ artifacts/onnx/a2-last-dce224ec/
 #   reports/mvp/{trust_scales,quant_gate,projection_gate}.json ckpt/a2/last.pt
 FROM python:3.11-slim
 
@@ -37,6 +37,8 @@ COPY --chown=user configs/ configs/
 COPY --chown=user drishtisr/ drishtisr/
 COPY --chown=user src/ src/
 COPY --chown=user app/ app/
+# The React UI, prebuilt with `npm run build` (app.server serves it at /).
+COPY --chown=user frontend/dist/ frontend/dist/
 COPY --chown=user artifacts/onnx/a2-last-dce224ec/ artifacts/onnx/a2-last-dce224ec/
 COPY --chown=user reports/mvp/trust_scales.json reports/mvp/quant_gate.json reports/mvp/projection_gate.json reports/mvp/
 COPY --chown=user ckpt/a2/last.pt ckpt/a2/last.pt

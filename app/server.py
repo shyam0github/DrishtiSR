@@ -3,15 +3,21 @@
 Run:  python -m app.server   (http://127.0.0.1:8000, cwd = repo root, PYTHONPATH = repo root)
 
 Routes: /api/health, /api/samples, /api/samples/{id}/thumb.png, POST /api/upscale,
-/files/{job_id}/{name} (job outputs), /fixtures (UI mock data), / (static UI,
-mounted last). Every error is JSON ``{"error": str}``. No CORS middleware:
+/files/{job_id}/{name} (job outputs), /fixtures (UI mock data), / (the React UI
+built into frontend/dist by `npm run build`, mounted last; DRISHTI_UI_DIR
+overrides the directory). Client-side routes such as /about fall back to
+index.html. If the build is missing, every UI path answers 503 naming the fix;
+the server does not fall back to the retired app/static UI.
+Every error is JSON ``{"error": str}``. No CORS middleware:
 same-origin only, and a POST whose Origin differs from its Host is refused.
 """
 
 from __future__ import annotations
 
+import os
 import re
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -38,6 +44,31 @@ class ApiError(Exception):
 
 def _error(status: int, message: str) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=status)
+
+
+def ui_dir() -> Path:
+    """Directory of the built web UI: DRISHTI_UI_DIR, else <repo>/frontend/dist."""
+    override = os.environ.get("DRISHTI_UI_DIR")
+    return Path(override).resolve() if override else APP_DIR.parent / "frontend" / "dist"
+
+
+class SpaStaticFiles(StaticFiles):
+    """StaticFiles that answers client-side routes (/about, /novelty/spectral) with index.html.
+
+    Only extensionless paths outside the API prefixes fall back; a missing asset
+    (/assets/x.js) or an unknown /api/... route stays a 404.
+    """
+
+    NO_FALLBACK = ("api", "files", "fixtures")
+
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if (exc.status_code != 404 or "." in path.rsplit("/", 1)[-1]
+                    or path.replace("\\", "/").split("/", 1)[0] in self.NO_FALLBACK):
+                raise
+            return await super().get_response("index.html", scope)
 
 
 def create_app(engine: Optional[Engine] = None) -> FastAPI:
@@ -143,7 +174,14 @@ def create_app(engine: Optional[Engine] = None) -> FastAPI:
         return FileResponse(path, media_type=MEDIA[path.suffix.lstrip(".")], filename=name)
 
     app.mount("/fixtures", StaticFiles(directory=APP_DIR / "fixtures"), name="fixtures")
-    app.mount("/", StaticFiles(directory=APP_DIR / "static", html=True), name="static")
+    ui = ui_dir()
+    if (ui / "index.html").is_file():
+        app.mount("/", SpaStaticFiles(directory=ui, html=True), name="ui")
+    else:
+        @app.get("/{_path:path}")
+        def ui_missing(_path: str):
+            raise ApiError(503, f"web UI not built: {ui / 'index.html'} is missing. "
+                                "Run `npm run build` in frontend/ (docs/RUN_DEMO.md).")
     return app
 
 

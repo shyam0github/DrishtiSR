@@ -66,9 +66,10 @@ def main() -> None:
     import uvicorn
 
     from app.pipeline import Engine
-    from app.server import create_app
+    from app.server import create_app, ui_dir
 
     port = free_port(args.host, args.port)
+    ui = ui_dir()
     engine = Engine()
     info = engine.model_info()
     url = f"http://{args.host}:{port}/"
@@ -78,6 +79,10 @@ def main() -> None:
     print(f"  interim       {str(info['interim']).lower()}", flush=True)
     print(f"  threads       {info['threads']} (OMP {os.environ['OMP_NUM_THREADS']}, "
           f"MKL {os.environ['MKL_NUM_THREADS']})", flush=True)
+    print(f"  ui            {ui}", flush=True)
+    if not (ui / "index.html").is_file():
+        print("  WARNING       web UI not built; run `npm run build` in frontend/ "
+              "(pages answer 503 until then)", flush=True)
     for w in engine.startup_warnings:
         print(f"  WARNING       {w}", flush=True)
     if not args.no_browser:

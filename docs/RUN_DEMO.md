@@ -3,7 +3,12 @@
 Paste into a fresh PowerShell window:
 
     Set-Location D:\SIH\DrishtiSR
+    Push-Location frontend; npm run build; Pop-Location
     powershell -ExecutionPolicy Bypass -File scripts\run_demo.ps1
+
+The server serves the React UI from `frontend/dist`, so rebuild after any
+frontend change; a stale build shows yesterday's pages. If `frontend/dist` is
+missing, the startup log warns and pages answer 503.
 
 The wrapper uses the project venv and the first free port of 8000/8001/8002. Without the wrapper: `D:\SIH\DrishtiSR\.venv\Scripts\python.exe scripts/serve.py --port 8000`
 Open the URL it prints, e.g. **http://127.0.0.1:8000/** (it opens by itself unless you pass `--no-browser`).

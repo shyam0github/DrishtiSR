@@ -32,13 +32,16 @@ and a **write** token.
    hardware.
 3. **Build the upload folder.** A Space holds only the files it needs, so copy
    them into a fresh staging folder that mirrors the repository layout. Run
-   this from `D:\SIH\DrishtiSR-mvp` (the samples must be built first with
-   `scripts/mvp/build_samples.py`):
+   this from `D:\SIH\DrishtiSR` on `main` (the samples must be built first with
+   `scripts/mvp/build_samples.py`). The first line rebuilds the React UI so the
+   Space never ships a stale `frontend/dist`:
 
    ```powershell
-   $S = "D:\SIH\hf_space_stage"; $W = "D:\SIH\DrishtiSR-mvp"; $O = "a2-last-dce224ec"
+   $S = "D:\SIH\hf_space_stage"; $W = "D:\SIH\DrishtiSR"; $O = "a2-last-dce224ec"
+   Push-Location "$W\frontend"; npm run build; Pop-Location
    robocopy "$W\deploy\hf_space" $S Dockerfile README.md
    robocopy "$W\app" "$S\app" /E /XD _jobs __pycache__
+   robocopy "$W\frontend\dist" "$S\frontend\dist" /E
    foreach ($d in "src", "drishtisr", "configs") { robocopy "$W\$d" "$S\$d" /E /XD __pycache__ }
    robocopy "$W\artifacts\onnx\$O" "$S\artifacts\onnx\$O" model_fp32.onnx export_meta.json
    robocopy "$W\reports\mvp" "$S\reports\mvp" trust_scales.json quant_gate.json projection_gate.json
