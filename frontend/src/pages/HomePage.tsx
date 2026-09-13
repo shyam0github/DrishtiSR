@@ -146,6 +146,14 @@ function IconTile({ name }: { name: IconName }) {
 
 function LiveDemo() {
   const { status, result, reset } = useResult();
+  // Samples sit below the viewer, so picking one leaves the page scrolled past the
+  // result; the StatCards then stay at their pre-count-up 0 until scrolled to.
+  // Bring the section up as the run starts (and on failure, for the error box).
+  useEffect(() => {
+    if (status === "running" || status === "error") {
+      document.getElementById(UPLOAD_SECTION_ID)?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    }
+  }, [status]);
   return (
     <section id={UPLOAD_SECTION_ID} className="scroll-mt-nav border-y border-line bg-ink-900/50" data-testid="live-demo">
       <div className="page-container flex flex-col gap-10 py-section">
